@@ -1,1 +1,37 @@
-export async function onRequestGet({env}){const db=env.DB,now=new Date().toISOString().slice(0,10),in30=new Date(Date.now()+30*864e5).toISOString().slice(0,10),month=new Date().toISOString().slice(0,7);const clients=(await db.prepare(`SELECT c.id,c.name,c.monthly_value,COALESCE(SUM(cs.quantity),0) workload FROM clients c LEFT JOIN client_services cs ON cs.client_id=c.id AND cs.period='month' WHERE c.status='Attivo' GROUP BY c.id ORDER BY c.monthly_value DESC`).all()).results||[];const mapped=clients.map(c=>{const value=Number(c.monthly_value||0),w=Number(c.workload||0),ratio=value/(w||1);let risk=ratio<35&&w>0?'Alto':ratio<60&&w>0?'Medio':'Basso';return {...c,score:Math.max(8,Math.min(100,ratio)),risk}});const one=async(q,...b)=>(await db.prepare(q).bind(...b).first())?.v||0;const overdue=await one(`SELECT COUNT(*) v FROM payments WHERE status='Scaduto' OR (status='Da pagare' AND due_date<?)`,now),contracts30=await one(`SELECT COUNT(*) v FROM contracts WHERE status='Firmato' AND end_date BETWEEN ? AND ?`,now,in30),renewals30=await one(`SELECT COUNT(*) v FROM subscriptions WHERE status='Attivo' AND renewal_date BETWEEN ? AND ?`,now,in30);let planned=await one(`SELECT COALESCE(SUM(quantity),0) v FROM client_services cs JOIN clients c ON c.id=cs.client_id WHERE c.status='Attivo' AND cs.period='month'`),done=await one(`SELECT COUNT(*) v FROM content WHERE substr(date,1,7)=? AND status IN ('Pubblicato','Programmato','Approvato')`,month);return Response.json({clients:mapped,overdue,contracts30,renewals30,missing:Math.max(0,planned-done)})}
+function parseSocial(row){
+  try{const n=JSON.parse(row?.notes||'{}');if(n.kind==='social_package')return {posts:Number(n.posts||0),reels:Number(n.reels||0),stories:Number(n.stories||0)}}catch{}
+  return null;
+}
+function weightService(name,qty){
+  const n=String(name||'').toLowerCase(),q=Number(qty||1);
+  if(n.includes('sito')) return 8*q;
+  if(n.includes('ads')) return 3*q;
+  if(n.includes('shoot')) return 4*q;
+  if(n.includes('branding')) return 5*q;
+  if(n.includes('newsletter')) return 2*q;
+  if(n.includes('automaz')) return 4*q;
+  return q;
+}
+export async function onRequestGet({env}){
+  const db=env.DB,now=new Date().toISOString().slice(0,10),in30=new Date(Date.now()+30*864e5).toISOString().slice(0,10),month=new Date().toISOString().slice(0,7);
+  const clients=(await db.prepare(`SELECT id,name,monthly_value FROM clients WHERE status='Attivo' ORDER BY monthly_value DESC`).all()).results||[];
+  const services=(await db.prepare(`SELECT cs.*,s.name service_name FROM client_services cs LEFT JOIN services s ON s.id=cs.service_id`).all()).results||[];
+  const content=(await db.prepare(`SELECT client_id,type,status FROM content WHERE substr(date,1,7)=?`).bind(month).all()).results||[];
+  let totalSocial={posts:0,reels:0,stories:0,total:0},missing=0;
+  const mapped=clients.map(c=>{
+    const rows=services.filter(r=>String(r.client_id)===String(c.id));
+    let posts=0,reels=0,stories=0,points=0,extras=[];
+    for(const r of rows){const sb=parseSocial(r);if(sb){posts+=sb.posts;reels+=sb.reels;stories+=sb.stories;points+=sb.posts+(sb.reels*2)+(sb.stories*.25)}else{const name=r.custom_name||r.service_name||'Servizio';extras.push(name);points+=weightService(name,r.quantity)}}
+    totalSocial.posts+=posts;totalSocial.reels+=reels;totalSocial.stories+=stories;
+    const done=content.filter(x=>String(x.client_id)===String(c.id)&&['Pubblicato','Programmato','Approvato'].includes(x.status));
+    const donePosts=done.filter(x=>/post|carosello/i.test(x.type||'')).length,doneReels=done.filter(x=>/reel/i.test(x.type||'')).length,doneStories=done.filter(x=>/story|stori/i.test(x.type||'')).length;
+    missing+=Math.max(0,posts-donePosts)+Math.max(0,reels-doneReels)+Math.max(0,stories-doneStories);
+    const value=Number(c.monthly_value||0),pressure=points/(Math.max(value,1)/100),risk=pressure>6?'Alto':pressure>3.5?'Medio':'Basso',score=Math.max(8,Math.min(100,pressure*12));
+    const bits=[];if(posts)bits.push(`${posts} Post`);if(reels)bits.push(`${reels} Reel`);if(stories)bits.push(`${stories} Storie`);if(extras.length)bits.push(extras.slice(0,2).join(' + '));
+    return {...c,posts,reels,stories,workload:posts+reels+stories,score,risk,summary:bits.join(' · ')||'Nessun deliverable configurato'};
+  });
+  totalSocial.total=totalSocial.posts+totalSocial.reels+totalSocial.stories;
+  const one=async(q,...b)=>(await db.prepare(q).bind(...b).first())?.v||0;
+  const overdue=await one(`SELECT COUNT(*) v FROM payments WHERE status='Scaduto' OR (status='Da pagare' AND due_date<?)`,now),contracts30=await one(`SELECT COUNT(*) v FROM contracts WHERE status='Firmato' AND end_date BETWEEN ? AND ?`,now,in30),renewals30=await one(`SELECT COUNT(*) v FROM subscriptions WHERE status='Attivo' AND renewal_date BETWEEN ? AND ?`,now,in30);
+  return Response.json({clients:mapped,overdue,contracts30,renewals30,missing,social:totalSocial});
+}
