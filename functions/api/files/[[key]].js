@@ -1,0 +1,1 @@
+export async function onRequestGet({env,params}){const key=(params.key||[]).join('/');const obj=await env.BUCKET.get(key);if(!obj)return new Response('File non trovato',{status:404});const h=new Headers();obj.writeHttpMetadata(h);h.set('etag',obj.httpEtag);return new Response(obj.body,{headers:h})}
