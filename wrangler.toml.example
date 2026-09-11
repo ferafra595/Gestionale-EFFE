@@ -1,0 +1,12 @@
+name = "effe-os"
+compatibility_date = "2026-09-01"
+pages_build_output_dir = "."
+
+[[d1_databases]]
+binding = "DB"
+database_name = "effe-os-db"
+database_id = "INSERISCI_DATABASE_ID"
+
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "effe-os-files"
