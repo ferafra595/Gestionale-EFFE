@@ -8,7 +8,7 @@ const TABLES={
   invoices:['client_id','number','issue_date','due_date','subtotal','vat_rate','total','status','payment_date','payment_method','notes'],
   payments:['client_id','type','amount','due_date','paid_date','status','method','reference','period','auto_generated','notes'],
   transactions:['client_id','payment_id','direction','date','category','amount','description','notes'],
-  subscriptions:['name','category','amount','frequency','renewal_date','status','notes'],
+  subscriptions:['name','category','amount','frequency','start_date','renewal_date','status','closed_date','auto_expense','notes'],
   equipment:['name','category','purchase_cost','purchase_date','warranty_end','serial','status','notes'],
   reports:['client_id','title','period','followers','reach','views','interactions','contents','ad_spend','leads','cpl','worked','wins','improve','next_strategy','social_results_json'],
   documents:['client_id','name','category','storage_key','created_date']
@@ -38,7 +38,13 @@ async function list(db,t){
 function orderField(t){return ({payments:'due_date',invoices:'issue_date',transactions:'date',quotes:'issue_date',reports:'period'}[t]||'id')}
 
 async function create(req,db,t){
-  const data=await req.json(),cols=TABLES[t].filter(k=>data[k]!==undefined),vals=cols.map(k=>normalize(data[k]));
+  const data=await req.json();
+  if(t==='subscriptions'){
+    if(!data.start_date)data.start_date=new Date().toISOString().slice(0,10);
+    if(data.auto_expense===undefined)data.auto_expense=1;
+    if(/chius|disdett|annull/i.test(String(data.status||''))&&!data.closed_date)data.closed_date=new Date().toISOString().slice(0,10);
+  }
+  const cols=TABLES[t].filter(k=>data[k]!==undefined),vals=cols.map(k=>normalize(data[k]));
   if(!cols.length)return Response.json({error:'Nessun dato'},{status:400});
   const q=`INSERT INTO ${t} (${cols.join(',')}) VALUES (${cols.map(()=>'?').join(',')})`;
   const r=await db.prepare(q).bind(...vals).run();
@@ -49,7 +55,12 @@ async function create(req,db,t){
 }
 
 async function update(req,db,t,id){
-  const data=await req.json(),cols=TABLES[t].filter(k=>data[k]!==undefined);
+  const data=await req.json();
+  if(t==='subscriptions'){
+    if(/chius|disdett|annull/i.test(String(data.status||''))&&!data.closed_date)data.closed_date=new Date().toISOString().slice(0,10);
+    if(String(data.status||'').toLowerCase()==='attivo')data.closed_date=null;
+  }
+  const cols=TABLES[t].filter(k=>data[k]!==undefined);
   if(!cols.length)return Response.json({error:'Nessun dato'},{status:400});
   const q=`UPDATE ${t} SET ${cols.map(k=>`${k}=?`).join(',')}, updated_at=CURRENT_TIMESTAMP WHERE id=?`;
   await db.prepare(q).bind(...cols.map(k=>normalize(data[k])),id).run();
