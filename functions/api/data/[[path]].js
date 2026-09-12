@@ -10,7 +10,7 @@ const TABLES={
   transactions:['client_id','payment_id','direction','date','category','amount','description','notes'],
   subscriptions:['name','category','amount','frequency','renewal_date','status','notes'],
   equipment:['name','category','purchase_cost','purchase_date','warranty_end','serial','status','notes'],
-  reports:['client_id','title','period','followers','reach','views','interactions','contents','ad_spend','leads','cpl','worked','wins','improve','next_strategy'],
+  reports:['client_id','title','period','followers','reach','views','interactions','contents','ad_spend','leads','cpl','worked','wins','improve','next_strategy','social_results_json'],
   documents:['client_id','name','category','storage_key','created_date']
 };
 
