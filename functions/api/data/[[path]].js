@@ -27,7 +27,7 @@ export async function onRequest({request,env,params}){
 
 async function list(db,t){
   let sql=`SELECT ${t}.*`;
-  if(TABLES[t].includes('client_id'))sql+=`, clients.name AS client_name`;
+  if(TABLES[t].includes('client_id'))sql+=`, clients.name AS client_name, clients.status AS client_status`;
   sql+=` FROM ${t}`;
   if(TABLES[t].includes('client_id'))sql+=` LEFT JOIN clients ON clients.id=${t}.client_id`;
   sql+=` ORDER BY ${orderField(t)} DESC`;
