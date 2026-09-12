@@ -7,7 +7,7 @@ export async function onRequestGet({env}){
     db.prepare(`SELECT id,package_end_date date,name client_name,'Fine pacchetto' kind,'Attivo' status FROM clients WHERE status='Attivo' AND package_end_date IS NOT NULL`),
     db.prepare(`SELECT co.id,co.end_date date,c.name client_name,'Contratto' kind,co.status status,co.title title FROM contracts co LEFT JOIN clients c ON c.id=co.client_id WHERE co.end_date IS NOT NULL AND COALESCE(co.status,'') NOT IN ('Annullato','Scaduto')`),
     db.prepare(`SELECT i.id,i.due_date date,c.name client_name,'Fattura' kind,i.status status,i.total amount FROM invoices i LEFT JOIN clients c ON c.id=i.client_id WHERE i.due_date IS NOT NULL AND COALESCE(i.status,'') NOT IN ('Pagata','Annullata')`),
-    db.prepare(`SELECT id,renewal_date date,name client_name,'Abbonamento' kind,status,amount FROM subscriptions WHERE renewal_date IS NOT NULL AND COALESCE(status,'Attivo')='Attivo'`),
+    db.prepare(`SELECT id,renewal_date date,name client_name,'Abbonamento' kind,status,amount FROM subscriptions WHERE renewal_date IS NOT NULL AND COALESCE(status,'Attivo') NOT IN ('Chiuso','Disdetto','Annullato')`),
     db.prepare(`SELECT id,warranty_end date,name client_name,'Garanzia' kind,status FROM equipment WHERE warranty_end IS NOT NULL AND COALESCE(status,'Operativo')<>'Dismesso'`)
   ]);
   const raw=[...(pay.results||[]),...(packages.results||[]),...(contracts.results||[]),...(invoices.results||[]),...(subs.results||[]),...(equip.results||[])];
