@@ -144,15 +144,18 @@ export async function onRequestPost({env}){
     const contract=await getContractInfo(db,client.id);
     const bounds=await paymentBounds(db,client.id);
 
-    // INIZIO RAPPORTO = la data più vecchia conosciuta.
-    // In questo modo recuperiamo anche tutti i mesi arretrati dei clienti già esistenti.
-    const startPeriod=minPeriod([
-      monthOf(client.start_date),
-      contract.earliestStart,
-      bounds.first,
-      monthOf(client.created_at),
-      nowPeriod
-    ]);
+    // INIZIO RAPPORTO: le date contrattuali hanno priorità assoluta.
+    // IMPORTANTE: created_at indica solo quando il cliente è stato inserito nel gestionale
+    // e NON deve anticipare l'inizio reale del rapporto.
+    // Esempio: cliente inserito a settembre ma con inizio a dicembre -> nessun pagamento
+    // viene creato prima di dicembre.
+    let startPeriod = monthOf(client.start_date) || contract.earliestStart || null;
+
+    // Per i vecchi clienti privi di una data inizio, recuperiamo lo storico dai pagamenti
+    // già presenti. Solo come ultima alternativa usiamo il mese di creazione della scheda.
+    if(!startPeriod){
+      startPeriod = bounds.first || monthOf(client.created_at) || nowPeriod;
+    }
 
     // FINE RAPPORTO:
     // 1) la data fine nella scheda cliente ha sempre priorità;
