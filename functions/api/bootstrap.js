@@ -24,6 +24,7 @@ export async function onRequestPost({env}){
     added.push(...await addMissing(db,'leads', [['converted_client_id','INTEGER']]));
     added.push(...await addMissing(db,'payments', [['period','TEXT'],['auto_generated','INTEGER DEFAULT 0']]));
     added.push(...await addMissing(db,'transactions', [['client_id','INTEGER'],['payment_id','INTEGER']]));
+    added.push(...await addMissing(db,'reports', [['social_results_json','TEXT']]));
 
     // Migrazione morbida: conserva i dati vecchi solo se i nuovi campi sono vuoti.
     await db.prepare(`UPDATE clients SET package_start_date=start_date WHERE package_start_date IS NULL AND start_date IS NOT NULL`).run();
