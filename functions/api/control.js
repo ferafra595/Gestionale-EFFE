@@ -6,8 +6,8 @@ export async function onRequestGet({env}){
   const [cr,sr,or_,pr,lr]=await db.batch([
     db.prepare(`SELECT id,name,monthly_value,package_start_date,package_end_date FROM clients WHERE status='Attivo' ORDER BY monthly_value DESC`),
     db.prepare(`SELECT cs.*,s.name service_name FROM client_services cs LEFT JOIN services s ON s.id=cs.service_id`),
-    db.prepare(`SELECT COUNT(*) v FROM payments WHERE status='Scaduto' OR (status='Da pagare' AND due_date<?)`).bind(now),
-    db.prepare(`SELECT COUNT(*) v FROM clients WHERE package_end_date BETWEEN ? AND ?`).bind(now,in30),
+    db.prepare(`SELECT COUNT(*) v FROM payments p LEFT JOIN clients c ON c.id=p.client_id WHERE c.status='Attivo' AND (p.status='Scaduto' OR (p.status='Da pagare' AND p.due_date<?))`).bind(now),
+    db.prepare(`SELECT COUNT(*) v FROM clients WHERE status='Attivo' AND package_end_date BETWEEN ? AND ?`).bind(now,in30),
     db.prepare(`SELECT COUNT(*) v FROM leads WHERE COALESCE(stage,'') NOT IN ('Cliente','Perso')`)
   ]);
   const clients=cr.results||[],services=sr.results||[];let social={posts:0,reels:0,stories:0,total:0};

@@ -20,7 +20,7 @@ function oneTimeFallsInCurrentYear(date){
 export async function onRequestGet({env}){
   const db=env.DB;if(!db)return Response.json({error:'Binding D1 DB mancante'},{status:500});
   const [cr,sr,ir,pr,tr,cor,lr,er,pjr]=await db.batch([
-    db.prepare(`SELECT * FROM clients ORDER BY CASE WHEN status='Attivo' THEN 0 ELSE 1 END,name`),
+    db.prepare(`SELECT * FROM clients WHERE status='Attivo' ORDER BY name`),
     db.prepare(`SELECT cs.*,s.name service_name FROM client_services cs LEFT JOIN services s ON s.id=cs.service_id`),
     db.prepare(`SELECT * FROM invoices`),db.prepare(`SELECT * FROM payments`),db.prepare(`SELECT * FROM transactions`),db.prepare(`SELECT * FROM contracts`),
     db.prepare(`SELECT COUNT(*) v FROM leads`),db.prepare(`SELECT COALESCE(SUM(purchase_cost),0) v FROM equipment`),db.prepare(`SELECT * FROM projects`)
@@ -49,9 +49,9 @@ export async function onRequestGet({env}){
     const monthly=[];for(let i=11;i>=0;i--){const d=new Date();d.setDate(1);d.setMonth(d.getMonth()-i);const mk=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`,mm=tx.filter(x=>String(x.date||'').slice(0,7)===mk);monthly.push({month:mk,revenue:mm.filter(x=>x.direction==='Entrata').reduce((s,x)=>s+n(x.amount),0),expense:mm.filter(x=>x.direction==='Uscita').reduce((s,x)=>s+n(x.amount),0)})}
     return {id:c.id,name:c.name,status:c.status,relationship_type:c.relationship_type||'',packageStart:pkgStart,packageEnd:pkgEnd,monthlyValue:n(c.monthly_value),annualRecurring:twelveMonthValue,remainingYearValue:yearEndValue,fullYearValue:recurring12,oneTimeValue,projectValue,oneTimeServicesValue,monthsToYearEnd,recurringToYearEnd,invoiceIssued:inv.reduce((s,x)=>s+n(x.total),0),invoicePaid:inv.filter(x=>/pagata/i.test(x.status||'')).reduce((s,x)=>s+n(x.total),0),invoiceOutstanding:inv.filter(x=>!/pagata|annullata/i.test(x.status||'')).reduce((s,x)=>s+n(x.total),0),paymentsPaid:pp.filter(x=>/pagat/i.test(x.status||'')).reduce((s,x)=>s+n(x.amount),0),paymentsPending:pp.filter(x=>!/pagat|annull/i.test(x.status||'')).reduce((s,x)=>s+n(x.amount),0),overduePayments:pp.filter(x=>!/pagat|annull/i.test(x.status||'')&&x.due_date&&x.due_date<today()).reduce((s,x)=>s+n(x.amount),0),actualIncome:income,actualExpense:expense,netActual:income-expense,social:{...social,total:social.posts+social.reels+social.stories},contractEnd:ct?.end_date||'',services:sv.map(x=>x.custom_name||x.service_name||'Servizio').filter(Boolean),monthly};
   });
-  const active=clients.filter(c=>c.status==='Attivo'),mrr=active.reduce((s,c)=>s+n(c.monthly_value),0),actualIncome=transactions.filter(x=>x.direction==='Entrata').reduce((s,x)=>s+n(x.amount),0),actualExpense=transactions.filter(x=>x.direction==='Uscita').reduce((s,x)=>s+n(x.amount),0),activeStats=clientStats.filter(x=>x.status==='Attivo');
+  const active=clients,activeIds=new Set(active.map(c=>String(c.id))),agencyTx=transactions.filter(x=>!x.client_id||activeIds.has(String(x.client_id))),mrr=active.reduce((s,c)=>s+n(c.monthly_value),0),actualIncome=agencyTx.filter(x=>x.direction==='Entrata').reduce((s,x)=>s+n(x.amount),0),actualExpense=agencyTx.filter(x=>x.direction==='Uscita').reduce((s,x)=>s+n(x.amount),0),activeStats=clientStats;
   return Response.json({
-    activeClients:active.length,totalClients:clients.length,mrr,
+    activeClients:active.length,totalClients:active.length,mrr,
     annualProjection:activeStats.reduce((s,x)=>s+x.annualRecurring,0),
     remainingYearProjection:activeStats.reduce((s,x)=>s+x.remainingYearValue,0),
     oneTimeProjection:activeStats.reduce((s,x)=>s+x.oneTimeValue,0),
