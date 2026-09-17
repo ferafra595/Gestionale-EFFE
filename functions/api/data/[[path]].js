@@ -11,7 +11,8 @@ const TABLES={
   subscriptions:['name','category','amount','frequency','start_date','renewal_date','status','closed_date','auto_expense','notes'],
   equipment:['name','category','purchase_cost','purchase_date','warranty_end','serial','status','notes'],
   reports:['client_id','title','period','followers','reach','views','interactions','contents','ad_spend','leads','cpl','worked','wins','improve','next_strategy','social_results_json'],
-  documents:['client_id','name','category','storage_key','created_date']
+  documents:['client_id','name','category','storage_key','created_date'],
+  appointments:['client_id','title','appointment_date','start_time','end_time','type','status','location','phone','notes']
 };
 
 export async function onRequest({request,env,params}){
@@ -35,7 +36,7 @@ async function list(db,t){
   return Response.json({items:results||[]});
 }
 
-function orderField(t){return ({payments:'due_date',invoices:'issue_date',transactions:'date',quotes:'issue_date',reports:'period'}[t]||'id')}
+function orderField(t){return ({payments:'due_date',invoices:'issue_date',transactions:'date',quotes:'issue_date',reports:'period',appointments:'appointment_date'}[t]||'id')}
 
 async function create(req,db,t){
   const data=await req.json();
