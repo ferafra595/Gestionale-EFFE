@@ -1,6 +1,6 @@
 export async function onRequestGet({env}){
   const db=env.DB;if(!db)return Response.json({error:'Binding D1 DB mancante'},{status:500});
-  const nowDate=new Date(),month=nowDate.toISOString().slice(0,7),now=nowDate.toISOString().slice(0,10),in30=new Date(Date.now()+30*864e5).toISOString().slice(0,10);
+  const nowDate=new Date(),month=nowDate.toISOString().slice(0,7),now=nowDate.toISOString().slice(0,10),tomorrow=new Date(Date.now()+864e5).toISOString().slice(0,10),in30=new Date(Date.now()+30*864e5).toISOString().slice(0,10);
   const activeTx=`(transactions.client_id IS NULL OR EXISTS(SELECT 1 FROM clients cta WHERE cta.id=transactions.client_id AND cta.status='Attivo'))`;
   const qs=[
     db.prepare(`SELECT COALESCE(SUM(amount),0) v FROM transactions WHERE direction='Entrata' AND substr(date,1,7)=? AND ${activeTx}`).bind(month),
@@ -18,6 +18,9 @@ export async function onRequestGet({env}){
   ];
   const [rev,cost,mrr,active,expectedMonth,paidMonth,pendingMonth,overdue,ending,openLeads,dueLeads,missingReports]=await db.batch(qs);
   const monthly=(await db.prepare(`SELECT substr(transactions.date,1,7) month,SUM(CASE WHEN direction='Entrata' THEN amount ELSE 0 END) revenue,SUM(CASE WHEN direction='Uscita' THEN amount ELSE 0 END) costs FROM transactions WHERE date>=date('now','-6 months') AND ${activeTx} GROUP BY substr(transactions.date,1,7) ORDER BY month`).all()).results||[];
+
+  const appointmentsToday=(await db.prepare(`SELECT a.*,c.name client_name FROM appointments a LEFT JOIN clients c ON c.id=a.client_id WHERE a.appointment_date=? AND lower(COALESCE(a.status,'')) NOT LIKE '%annull%' ORDER BY COALESCE(a.start_time,'99:99'),a.id`).bind(now).all()).results||[];
+  const appointmentsTomorrow=(await db.prepare(`SELECT a.*,c.name client_name FROM appointments a LEFT JOIN clients c ON c.id=a.client_id WHERE a.appointment_date=? AND lower(COALESCE(a.status,'')) NOT LIKE '%annull%' ORDER BY COALESCE(a.start_time,'99:99'),a.id`).bind(tomorrow).all()).results||[];
 
   const actions=[];
   const overdueRows=(await db.prepare(`SELECT p.id,p.amount,p.due_date,c.name client_name FROM payments p JOIN clients c ON c.id=p.client_id WHERE c.status='Attivo' AND (p.status='Scaduto' OR (p.status='Da pagare' AND p.due_date<?)) ORDER BY p.due_date LIMIT 6`).bind(now).all()).results||[];
@@ -37,6 +40,6 @@ export async function onRequestGet({env}){
     profitMonth:Number(rev.results?.[0]?.v||0)-Number(cost.results?.[0]?.v||0),
     mrr:Number(mrr.results?.[0]?.v||0),activeClients:Number(active.results?.[0]?.v||0),
     expectedMonth:Number(expectedMonth.results?.[0]?.v||0),paidMonth:Number(paidMonth.results?.[0]?.v||0),pendingMonth:Number(pendingMonth.results?.[0]?.v||0),
-    overduePayments:ov,endingPackages:en,openLeads:ld,dueLeads:dr,missingReports:mr,healthScore:Math.round(health),monthly,actions
+    overduePayments:ov,endingPackages:en,openLeads:ld,dueLeads:dr,missingReports:mr,healthScore:Math.round(health),monthly,actions,appointmentsToday,appointmentsTomorrow
   });
 }

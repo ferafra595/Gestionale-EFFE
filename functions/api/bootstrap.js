@@ -35,6 +35,23 @@ export async function onRequestPost({env}){
     await db.prepare(`UPDATE subscriptions SET start_date=COALESCE(start_date,renewal_date,date(created_at)) WHERE start_date IS NULL`).run();
     await db.prepare(`UPDATE subscriptions SET auto_expense=1 WHERE auto_expense IS NULL`).run();
 
+    await db.prepare(`CREATE TABLE IF NOT EXISTS appointments(
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      client_id INTEGER,
+      title TEXT NOT NULL,
+      appointment_date TEXT NOT NULL,
+      start_time TEXT,
+      end_time TEXT,
+      type TEXT,
+      status TEXT DEFAULT 'Confermato',
+      location TEXT,
+      phone TEXT,
+      notes TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE SET NULL
+    )`).run();
+
     const indexes=[
       `CREATE INDEX IF NOT EXISTS idx_clients_status ON clients(status)`,
       `CREATE INDEX IF NOT EXISTS idx_clients_package_dates ON clients(package_start_date,package_end_date)`,
@@ -44,7 +61,9 @@ export async function onRequestPost({env}){
       `CREATE INDEX IF NOT EXISTS idx_transactions_client_date ON transactions(client_id,date)`,
       `CREATE UNIQUE INDEX IF NOT EXISTS idx_transactions_payment ON transactions(payment_id) WHERE payment_id IS NOT NULL`,
       `CREATE UNIQUE INDEX IF NOT EXISTS idx_transactions_subscription_period ON transactions(subscription_id,subscription_period) WHERE subscription_id IS NOT NULL AND auto_generated=1`,
-      `CREATE INDEX IF NOT EXISTS idx_subscriptions_status_start ON subscriptions(status,start_date)`
+      `CREATE INDEX IF NOT EXISTS idx_subscriptions_status_start ON subscriptions(status,start_date)`,
+      `CREATE INDEX IF NOT EXISTS idx_appointments_date_time ON appointments(appointment_date,start_time)`,
+      `CREATE INDEX IF NOT EXISTS idx_appointments_client ON appointments(client_id)`
     ];
     for(const sql of indexes)await db.prepare(sql).run();
     return Response.json({ok:true,added});
