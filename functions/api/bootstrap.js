@@ -26,6 +26,7 @@ export async function onRequestPost({env}){
     added.push(...await addMissing(db,'transactions', [['client_id','INTEGER'],['payment_id','INTEGER'],['payment_receipt_id','INTEGER'],['subscription_id','INTEGER'],['subscription_period','TEXT'],['auto_generated','INTEGER DEFAULT 0']]));
     added.push(...await addMissing(db,'reports', [['social_results_json','TEXT']]));
     added.push(...await addMissing(db,'subscriptions', [['start_date','TEXT'],['closed_date','TEXT'],['auto_expense','INTEGER DEFAULT 1']]));
+    added.push(...await addMissing(db,'quotes', [['quote_number','TEXT'],['template',"TEXT DEFAULT 'premium'"],['client_snapshot_json','TEXT'],['totals_json','TEXT'],['notes','TEXT']]));
 
     // Migrazione morbida: conserva i dati vecchi solo se i nuovi campi sono vuoti.
     await db.prepare(`UPDATE clients SET package_start_date=start_date WHERE package_start_date IS NULL AND start_date IS NOT NULL`).run();
@@ -78,7 +79,9 @@ export async function onRequestPost({env}){
       `CREATE UNIQUE INDEX IF NOT EXISTS idx_transactions_subscription_period ON transactions(subscription_id,subscription_period) WHERE subscription_id IS NOT NULL AND auto_generated=1`,
       `CREATE INDEX IF NOT EXISTS idx_subscriptions_status_start ON subscriptions(status,start_date)`,
       `CREATE INDEX IF NOT EXISTS idx_appointments_date_time ON appointments(appointment_date,start_time)`,
-      `CREATE INDEX IF NOT EXISTS idx_appointments_client ON appointments(client_id)`
+      `CREATE INDEX IF NOT EXISTS idx_appointments_client ON appointments(client_id)`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_quotes_number ON quotes(quote_number) WHERE quote_number IS NOT NULL`,
+      `CREATE INDEX IF NOT EXISTS idx_quotes_client_status ON quotes(client_id,status)`
     ];
     for(const sql of indexes)await db.prepare(sql).run();
     return Response.json({ok:true,added});
