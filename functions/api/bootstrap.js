@@ -23,7 +23,7 @@ export async function onRequestPost({env}){
     ]));
     added.push(...await addMissing(db,'leads', [['converted_client_id','INTEGER']]));
     added.push(...await addMissing(db,'payments', [['period','TEXT'],['auto_generated','INTEGER DEFAULT 0']]));
-    added.push(...await addMissing(db,'transactions', [['client_id','INTEGER'],['payment_id','INTEGER'],['subscription_id','INTEGER'],['subscription_period','TEXT'],['auto_generated','INTEGER DEFAULT 0']]));
+    added.push(...await addMissing(db,'transactions', [['client_id','INTEGER'],['payment_id','INTEGER'],['payment_receipt_id','INTEGER'],['subscription_id','INTEGER'],['subscription_period','TEXT'],['auto_generated','INTEGER DEFAULT 0']]));
     added.push(...await addMissing(db,'reports', [['social_results_json','TEXT']]));
     added.push(...await addMissing(db,'subscriptions', [['start_date','TEXT'],['closed_date','TEXT'],['auto_expense','INTEGER DEFAULT 1']]));
 
@@ -34,6 +34,19 @@ export async function onRequestPost({env}){
     await db.prepare(`UPDATE clients SET billing_day=30 WHERE billing_day IS NULL OR billing_day<1 OR billing_day>31`).run();
     await db.prepare(`UPDATE subscriptions SET start_date=COALESCE(start_date,renewal_date,date(created_at)) WHERE start_date IS NULL`).run();
     await db.prepare(`UPDATE subscriptions SET auto_expense=1 WHERE auto_expense IS NULL`).run();
+
+    await db.prepare(`CREATE TABLE IF NOT EXISTS payment_receipts(
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      payment_id INTEGER NOT NULL,
+      amount REAL NOT NULL,
+      receipt_date TEXT NOT NULL,
+      method TEXT,
+      notes TEXT,
+      kind TEXT DEFAULT 'Acconto',
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(payment_id) REFERENCES payments(id) ON DELETE CASCADE
+    )`).run();
 
     await db.prepare(`CREATE TABLE IF NOT EXISTS appointments(
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -60,6 +73,8 @@ export async function onRequestPost({env}){
       `CREATE INDEX IF NOT EXISTS idx_payments_client_period_status ON payments(client_id,period,status)`,
       `CREATE INDEX IF NOT EXISTS idx_transactions_client_date ON transactions(client_id,date)`,
       `CREATE UNIQUE INDEX IF NOT EXISTS idx_transactions_payment ON transactions(payment_id) WHERE payment_id IS NOT NULL`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_transactions_payment_receipt ON transactions(payment_receipt_id) WHERE payment_receipt_id IS NOT NULL`,
+      `CREATE INDEX IF NOT EXISTS idx_payment_receipts_payment ON payment_receipts(payment_id,receipt_date)`,
       `CREATE UNIQUE INDEX IF NOT EXISTS idx_transactions_subscription_period ON transactions(subscription_id,subscription_period) WHERE subscription_id IS NOT NULL AND auto_generated=1`,
       `CREATE INDEX IF NOT EXISTS idx_subscriptions_status_start ON subscriptions(status,start_date)`,
       `CREATE INDEX IF NOT EXISTS idx_appointments_date_time ON appointments(appointment_date,start_time)`,
