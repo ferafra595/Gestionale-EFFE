@@ -3,7 +3,7 @@ const TABLES={
   clients:['name','contact_name','phone','email','address','vat','status','relationship_type','monthly_value','source','auto_billing','billing_day','package_start_date','package_end_date','notes'],
   leads:['name','contact_name','phone','email','source','service_interest','stage','expected_value','probability','next_contact','notes','converted_client_id'],
   services:['name','category','indicative_price','internal_cost','unit','description'],
-  quotes:['client_id','issue_date','title','status','valid_until','introduction','objectives','strategy','items_json','total','duration','payment_terms','conditions'],
+  quotes:['client_id','issue_date','title','status','valid_until','introduction','objectives','strategy','items_json','total','duration','payment_terms','conditions','quote_number','template','client_snapshot_json','totals_json','notes'],
   contracts:['client_id','title','type','status','value','start_date','end_date','payment_terms','body'],
   invoices:['client_id','number','issue_date','due_date','subtotal','vat_rate','total','status','payment_date','payment_method','notes'],
   payments:['client_id','type','amount','due_date','paid_date','status','method','reference','period','auto_generated','notes'],
