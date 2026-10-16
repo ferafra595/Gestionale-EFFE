@@ -13,7 +13,7 @@ export async function onRequestPost({env}){
   const removedInactive=await db.prepare(`
     DELETE FROM payments
     WHERE type='Canone' AND auto_generated=1
-      AND status NOT IN ('Pagato','Annullato')
+      AND status NOT IN ('Pagato','Annullato','Parzialmente pagato')
       AND client_id IN (SELECT id FROM clients WHERE status<>'Attivo')
   `).run();
 
@@ -54,7 +54,7 @@ export async function onRequestPost({env}){
     // Elimina solo rate automatiche aperte fuori dal periodo valido.
     for(const p of rows){
       const pp=p.period||monthOf(p.due_date)||monthOf(p.paid_date);
-      if(Number(p.auto_generated||0)===1&&!['Pagato','Annullato'].includes(p.status)&&pp&&!valid.has(pp)){
+      if(Number(p.auto_generated||0)===1&&!['Pagato','Annullato','Parzialmente pagato'].includes(p.status)&&pp&&!valid.has(pp)){
         statements.push(db.prepare(`DELETE FROM payments WHERE id=?`).bind(p.id));removed++;
       }
     }
@@ -64,13 +64,14 @@ export async function onRequestPost({env}){
       if(existing){
         const needsPeriod=!existing.period;
         const autoOpen=Number(existing.auto_generated||0)===1&&!['Pagato','Annullato'].includes(existing.status);
-        const needsCore=autoOpen&&(Number(existing.amount||0)!==amount||String(existing.due_date||'')!==due||String(existing.status||'')!==status);
+        const targetStatus=existing.status==='Parzialmente pagato'?'Parzialmente pagato':status;
+        const needsCore=autoOpen&&(Number(existing.amount||0)!==amount||String(existing.due_date||'')!==due||String(existing.status||'')!==targetStatus);
         if(needsPeriod&&needsCore){
-          statements.push(db.prepare(`UPDATE payments SET period=?,amount=?,due_date=?,status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(period,amount,due,status,existing.id));updated++;
+          statements.push(db.prepare(`UPDATE payments SET period=?,amount=?,due_date=?,status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(period,amount,due,targetStatus,existing.id));updated++;
         }else if(needsPeriod){
           statements.push(db.prepare(`UPDATE payments SET period=? WHERE id=?`).bind(period,existing.id));updated++;
         }else if(needsCore){
-          statements.push(db.prepare(`UPDATE payments SET amount=?,due_date=?,status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(amount,due,status,existing.id));updated++;
+          statements.push(db.prepare(`UPDATE payments SET amount=?,due_date=?,status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(amount,due,targetStatus,existing.id));updated++;
         }
       }else{
         statements.push(db.prepare(`INSERT INTO payments(client_id,type,amount,due_date,status,reference,period,auto_generated,notes) VALUES(?,?,?,?,?,?,?,?,?)`).bind(c.id,'Canone',amount,due,status,`AUTO-${c.id}-${period}`,period,1,'Canone mensile generato automaticamente dal periodo pacchetto EFFE OS'));created++;
