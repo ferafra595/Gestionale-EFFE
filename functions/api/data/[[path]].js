@@ -7,7 +7,7 @@ const TABLES={
   contracts:['client_id','title','type','status','value','start_date','end_date','payment_terms','body'],
   invoices:['client_id','number','issue_date','due_date','subtotal','vat_rate','total','status','payment_date','payment_method','notes'],
   payments:['client_id','type','amount','due_date','paid_date','status','method','reference','period','auto_generated','notes'],
-  transactions:['client_id','payment_id','direction','date','category','amount','description','notes'],
+  transactions:['client_id','payment_id','payment_receipt_id','direction','date','category','amount','description','notes'],
   subscriptions:['name','category','amount','frequency','start_date','renewal_date','status','closed_date','auto_expense','notes'],
   equipment:['name','category','purchase_cost','purchase_date','warranty_end','serial','status','notes'],
   reports:['client_id','title','period','followers','reach','views','interactions','contents','ad_spend','leads','cpl','worked','wins','improve','next_strategy','social_results_json'],
@@ -33,7 +33,24 @@ async function list(db,t){
   if(TABLES[t].includes('client_id'))sql+=` LEFT JOIN clients ON clients.id=${t}.client_id`;
   sql+=` ORDER BY ${orderField(t)} DESC`;
   const {results}=await db.prepare(sql).all();
-  return Response.json({items:results||[]});
+  const items=results||[];
+  if(t==='payments'&&items.length){
+    const [rr,tr]=await db.batch([
+      db.prepare(`SELECT payment_id,COALESCE(SUM(amount),0) amount FROM payment_receipts GROUP BY payment_id`),
+      db.prepare(`SELECT payment_id,COALESCE(SUM(amount),0) amount FROM transactions WHERE payment_id IS NOT NULL GROUP BY payment_id`)
+    ]);
+    const receiptMap=new Map((rr.results||[]).map(x=>[String(x.payment_id),Number(x.amount||0)]));
+    const legacyMap=new Map((tr.results||[]).map(x=>[String(x.payment_id),Number(x.amount||0)]));
+    for(const x of items){
+      const total=Math.max(0,Number(x.amount||0));
+      let paid=Number(receiptMap.get(String(x.id))||0)+Number(legacyMap.get(String(x.id))||0);
+      if(String(x.status||'')==='Pagato'&&paid<=0)paid=total; // compatibilità con pagamenti storici
+      paid=Math.max(0,Math.min(total,paid));
+      x.paid_amount=paid;
+      x.residual_amount=Math.max(0,total-paid);
+    }
+  }
+  return Response.json({items});
 }
 
 function orderField(t){return ({payments:'due_date',invoices:'issue_date',transactions:'date',quotes:'issue_date',reports:'period',appointments:'appointment_date'}[t]||'id')}
@@ -97,7 +114,10 @@ async function convertLeadIfNeeded(db,id){
 }
 
 async function remove(db,t,id){
-  if(t==='payments'){try{await db.prepare('DELETE FROM transactions WHERE payment_id=?').bind(id).run()}catch{}}
+  if(t==='payments'){
+    try{await db.prepare('DELETE FROM transactions WHERE payment_id=? OR payment_receipt_id IN (SELECT id FROM payment_receipts WHERE payment_id=?)').bind(id,id).run()}catch{}
+    try{await db.prepare('DELETE FROM payment_receipts WHERE payment_id=?').bind(id).run()}catch{}
+  }
   await db.prepare(`DELETE FROM ${t} WHERE id=?`).bind(id).run();
   return Response.json({ok:true});
 }
