@@ -443,6 +443,94 @@ async function loadLiveMetaInsights(){
   }catch(e){if($('#metaLiveInsights'))output.textContent='Errore lettura Meta: '+String(e.message||e)}
   finally{if(button)button.disabled=false}
 }
+
+async function multiMetaRequest(url,payload=null){
+  const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),75000);
+  try{
+    const r=await fetch(url,{method:payload?'POST':'GET',credentials:'same-origin',cache:'no-store',
+      headers:{'Accept':'application/json',...(payload?{'Content-Type':'application/json'}:{})},
+      body:payload?JSON.stringify(payload):undefined,signal:ctrl.signal});
+    const d=await r.json().catch(()=>null);
+    if(!r.ok)throw new Error((d&&typeof d.error==='string'?d.error:'Errore richiesta Meta')+' (HTTP '+r.status+')');
+    if(!d||typeof d!=='object')throw new Error('Risposta Meta non valida');
+    return d;
+  }catch(e){if(e?.name==='AbortError')throw new Error('Timeout lettura Meta. Riprova con meno account.');throw e}
+  finally{clearTimeout(timer)}
+}
+async function loadMultiMeta(clients){
+  const area=$('#metaMultiArea'),month=$('#metaMultiMonth')?.value||monthKey();
+  if(!area)return;
+  area.textContent='Caricamento archivio clienti…';
+  try{
+    const data=await multiMetaRequest('/api/social/manager?month='+encodeURIComponent(month));
+    if(!$('#metaMultiArea'))return;
+    if(data.setup_required){
+      area.innerHTML='<p>Attiva l’archivio separato delle statistiche. Questa operazione non modifica i report esistenti.</p><button class="btn btn-primary" id="metaMultiSetup">Attiva archivio Meta</button>';
+      $('#metaMultiSetup').onclick=async()=>{
+        try{await multiMetaRequest('/api/social/manager',{action:'setup'});toast('Archivio Meta inizializzato');loadMultiMeta(clients)}
+        catch(e){toast(e.message)}
+      };
+      return;
+    }
+    const linked=new Map((data.accounts||[]).map(a=>[Number(a.client_id),a]));
+    const saved=new Map((data.months||[]).map(m=>[Number(m.client_id),m]));
+    const num=x=>x===null||x===undefined?'—':Number(x).toLocaleString('it-IT');
+    const rows=clients.map(c=>{
+      const a=linked.get(Number(c.id)),m=saved.get(Number(c.id));
+      const status=a?'@'+esc(a.username||'Instagram'):'Non associato';
+      return '<tr><td><strong>'+esc(c.name)+'</strong></td><td>'+status+'</td><td>'+num(m?.views)+'</td><td>'+num(m?.reach)+'</td><td>'+num(m?.interactions)+'</td><td>'+num(m?.followers_current)+'</td><td>'+(m?'Aggiornato '+esc(String(m.collected_at||'').slice(0,16)):a?'Dati da acquisire':'—')+'</td></tr>';
+    }).join('');
+    area.innerHTML='<div class="section-title"><div><h3>Account Instagram clienti</h3><span>'+linked.size+' profili associati · '+saved.size+' riepiloghi per '+esc(month)+'</span></div></div>'+
+      '<div class="actions" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">'+
+      '<button class="btn btn-ghost" id="metaMultiSuggestions">Trova associazioni</button>'+
+      '<button class="btn btn-primary" id="metaMultiSync" '+(!linked.size?'disabled':'')+'>Aggiorna tutti i clienti collegati</button>'+
+      '<button class="btn btn-ghost" id="metaMultiCsv" '+(!saved.size?'disabled':'')+'>Esporta CSV</button></div>'+
+      '<div id="metaMultiSuggestionArea" class="small muted"></div>'+
+      '<div class="table-wrap"><table class="table"><thead><tr><th>Cliente</th><th>Profilo</th><th>Views</th><th>Reach</th><th>Interazioni</th><th>Follower attuali</th><th>Ultimo dato</th></tr></thead><tbody>'+rows+'</tbody></table></div>'+
+      '<p class="small muted" style="margin-top:12px">Le metriche sono lette dall’API Instagram. Follower = dato corrente; visualizzazioni, copertura e interazioni = periodo selezionato. I report manuali e le statistiche Facebook restano separati.</p>';
+    $('#metaMultiSuggestions').onclick=async()=>{
+      const display=$('#metaMultiSuggestionArea');
+      display.textContent='Ricerca degli account autorizzati in corso…';
+      try{
+        const d=await multiMetaRequest('/api/social/manager?action=suggest');
+        const found=d.suggestions||[];
+        if(!found.length){display.textContent='Nessuna associazione automatica certa. Gli account non riconosciuti richiedono una verifica prima del collegamento.';return}
+        display.innerHTML='<p>Proposte basate su nomi già verificati: controllale prima di confermare.</p>'+
+          found.map(x=>'<label style="display:block;padding:6px"><input type="checkbox" class="metaLinkChoice" value="'+Number(x.client_id)+'" checked> '+esc(x.client_name)+' → @'+esc(x.username)+'</label>').join('')+
+          '<button class="btn btn-primary" id="metaMultiApply">Collega account selezionati</button>';
+        $('#metaMultiApply').onclick=async()=>{
+          const selected=$('.metaLinkChoice:checked').map(x=>Number(x.value));
+          if(!selected.length)return toast('Nessun account selezionato');
+          if(!confirm('Confermi l’associazione di '+selected.length+' account Instagram ai clienti EFFE?'))return;
+          const b=$('#metaMultiApply');b.disabled=true;
+          try{
+            const saved=await multiMetaRequest('/api/social/manager',{action:'auto_link',confirm:true,client_ids:selected});
+            toast((saved.linked||[]).length+' account associati');loadMultiMeta(clients)
+          }catch(e){b.disabled=false;toast(e.message)}
+        };
+      }catch(e){display.textContent='Impossibile cercare le associazioni: '+e.message}
+    };
+    $('#metaMultiSync').onclick=async()=>{
+      const b=$('#metaMultiSync');b.disabled=true;b.textContent='Recupero dati in corso…';
+      try{
+        const result=await multiMetaRequest('/api/social/manager',{action:'sync',month});
+        const failed=(result.results||[]).filter(x=>x.status!=='saved');
+        toast(result.updated+' profili aggiornati'+(failed.length?', '+failed.length+' non disponibili':''));
+        if(failed.length){const t=$('#metaMultiSuggestionArea');if(t)t.textContent='Non aggiornati: '+failed.map(x=>x.client_name+' ('+x.status+')').join(', ')}
+        else loadMultiMeta(clients);
+      }catch(e){toast(e.message)}finally{if($('#metaMultiSync')){b.disabled=false;b.textContent='Aggiorna tutti i clienti collegati'}}
+    };
+    $('#metaMultiCsv').onclick=()=>{
+      const header=['Cliente','Instagram','Periodo','Fine esclusiva','Follower attuali','Media attuali','Views','Reach','Interazioni','Aggiornato'];
+      const rows=(data.months||[]).map(m=>[m.client_name,'@'+(m.username||''),m.period,m.period_end,m.followers_current,m.media_count_current,m.views,m.reach,m.interactions,m.collected_at]);
+      const quote=v=>'"'+String(v===null||v===undefined?'':v).replace(/"/g,'""')+'"';
+      const csv='\ufeff'+[header,...rows].map(r=>r.map(quote).join(';')).join('\n');
+      const u=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));
+      const link=document.createElement('a');link.href=u;link.download='effe-instagram-'+month+'.csv';
+      document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(u),3000);
+    };
+  }catch(e){if($('#metaMultiArea'))area.textContent='Errore archivio Meta: '+String(e.message||e)}
+}
 async function reportsPage(){
   try{
     const [saved,analytics]=await Promise.all([api('/api/data/reports'),apiCached('/api/analytics',20000)]);
@@ -459,7 +547,9 @@ async function reportsPage(){
     });
     const socialOverviewRows=socialOverview.map(c=>`<tr><td><strong>${esc(c.name)}</strong></td><td>${c.period?esc(reportPeriodLabel(c.period)):'—'}</td><td>${c.platforms.length?esc([...new Set(c.platforms)].join(', ')):'Nessun dato disponibile'}</td><td>${c.period?'<span class="badge info">Storico disponibile</span>':'<span class="badge warn">Non collegato</span>'}</td></tr>`).join('');
     const historyRows=items.slice().sort((a,b)=>String(b.period).localeCompare(String(a.period))).map(r=>{const a=aggregateReport(r);const vals=[a.followers,a.reach,a.views,a.interactions,a.leads].map((v,i)=>formatReportMetric(['followers','reach','views','interactions','leads'][i],v));return `<tr><td>${reportPeriodLabel(r.period)}</td><td><strong>${esc(r.client_name||'—')}</strong></td>${vals.map(v=>`<td>${v}</td>`).join('')}<td><button class="btn btn-ghost editReport" data-id="${r.id}">Modifica</button> <button class="btn btn-danger delReport" data-id="${r.id}">Elimina</button></td></tr>`}).join('');
-    $('#content').innerHTML=`<div class="page-head"><div><h1>Report</h1><p>Registra ogni mese i risultati numerici dei singoli social. EFFE OS mantiene separati i profili e crea anche il riepilogo complessivo.</p></div><button class="btn btn-primary" id="addReport">＋ Registra mese</button></div><div class="card"><div class="section-title"><div><h2>Analisi cliente</h2><span>Seleziona il cliente per vedere social separati, riepilogo e andamento mensile</span></div><select id="reportClientFilter" class="select report-client-select">${clients.map(c=>`<option value="${c.id}" ${String(c.id)===String(firstClient)?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div></div><div class="card" style="margin-top:16px"><div class="section-title"><div><h2>Statistiche social — stato delle fonti</h2><span>Tutti i clienti in un'unica vista: dati storici soltanto se effettivamente registrati</span></div><button type="button" class="btn btn-ghost" id="testMetaInsights">Verifica collegamento Meta</button></div><div id="metaInsightsTestResult" class="small muted" style="margin-bottom:12px">Nessun profilo Meta verificato automaticamente.</div><div class="card" style="margin:12px 0 16px;padding:16px"><div class="section-title"><div><h3>Instagram — dati live Meta (account pilota)</h3><span>Recupero diretto dalle API, senza trascrizione e senza salvare valori nei report dei clienti</span></div><button class="btn btn-ghost" type="button" id="refreshMetaInsights">Aggiorna statistiche</button></div><div class="field" style="max-width:250px;margin-bottom:12px"><label for="metaInsightsMonth">Mese da analizzare</label><input id="metaInsightsMonth" class="input" type="month" value="${esc(monthKey())}" max="${esc(monthKey())}"></div><div id="metaLiveInsights" class="small muted" aria-live="polite">Caricamento dati Meta…</div></div><div class="table-wrap"><table class="table"><thead><tr><th>Cliente</th><th>Ultimo mese con dati</th><th>Profili registrati</th><th>Stato</th></tr></thead><tbody>${socialOverviewRows||'<tr><td colspan="4">Nessun cliente attivo.</td></tr>'}</tbody></table></div><p class="small muted" style="margin-top:12px">La verifica Meta utilizza soltanto un account pilota, se configurato da Cloudflare. Non riempie i report mensili, non pubblica post e non imposta valori mancanti a zero.</p></div><div class="card" style="margin-top:16px"><div class="section-title"><div><h2>Riepilogo automatico clienti</h2><span>Generato dai dati del gestionale, senza compilazione mensile. Non sono statistiche social.</span></div><button class="btn btn-ghost" type="button" id="copyAutomaticReport">Copia riepilogo</button></div><div class="table-wrap"><table class="table"><thead><tr><th>Cliente</th><th>Canone</th><th>Da incassare (registrato)</th><th>Scaduto</th><th>Fine pacchetto</th></tr></thead><tbody>${automaticRows||'<tr><td colspan="5">Nessun cliente attivo.</td></tr>'}</tbody></table></div></div><div id="reportTrendPanel" style="margin-top:16px">${reportTrendPanel(items,firstClient)}</div><div class="card" style="margin-top:16px"><div class="section-title"><div><h2>Storico mensile complessivo</h2><span>I valori non registrati o pari a 0 vengono ignorati</span></div></div><div class="table-wrap"><table class="table"><thead><tr><th>Mese</th><th>Cliente</th><th>Follower</th><th>Reach</th><th>Views</th><th>Interazioni</th><th>Lead</th><th>Azioni</th></tr></thead><tbody>${historyRows||'<tr><td colspan="8" class="empty">Nessun mese registrato.</td></tr>'}</tbody></table></div></div>`;
+    $('#content').innerHTML=`<div class="page-head"><div><h1>Report</h1><p>Registra ogni mese i risultati numerici dei singoli social. EFFE OS mantiene separati i profili e crea anche il riepilogo complessivo.</p></div><button class="btn btn-primary" id="addReport">＋ Registra mese</button></div><div class="card"><div class="section-title"><div><h2>Analisi cliente</h2><span>Seleziona il cliente per vedere social separati, riepilogo e andamento mensile</span></div><select id="reportClientFilter" class="select report-client-select">${clients.map(c=>`<option value="${c.id}" ${String(c.id)===String(firstClient)?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div></div><div class="card" style="margin-top:16px"><div class="section-title"><div><h2>Statistiche social — stato delle fonti</h2><span>Tutti i clienti in un'unica vista: dati storici soltanto se effettivamente registrati</span></div><button type="button" class="btn btn-ghost" id="testMetaInsights">Verifica collegamento Meta</button></div><div id="metaInsightsTestResult" class="small muted" style="margin-bottom:12px">Nessun profilo Meta verificato automaticamente.</div><div class="card" style="margin:12px 0 16px;padding:16px"><div class="section-title"><div><h3>Report Instagram — tutti i clienti</h3><span>Statistiche archiviate per mese, senza trascrizione manuale</span></div></div><div class="field" style="max-width:260px;margin-bottom:12px"><label for="metaMultiMonth">Periodo di riferimento</label><input type="month" id="metaMultiMonth" class="input" value="${esc(monthKey())}" max="${esc(monthKey())}"></div><div id="metaMultiArea" aria-live="polite"></div></div><div class="card" style="margin:12px 0 16px;padding:16px"><div class="section-title"><div><h3>Instagram — dati live Meta (account pilota)</h3><span>Recupero diretto dalle API, senza trascrizione e senza salvare valori nei report dei clienti</span></div><button class="btn btn-ghost" type="button" id="refreshMetaInsights">Aggiorna statistiche</button></div><div class="field" style="max-width:250px;margin-bottom:12px"><label for="metaInsightsMonth">Mese da analizzare</label><input id="metaInsightsMonth" class="input" type="month" value="${esc(monthKey())}" max="${esc(monthKey())}"></div><div id="metaLiveInsights" class="small muted" aria-live="polite">Caricamento dati Meta…</div></div><div class="table-wrap"><table class="table"><thead><tr><th>Cliente</th><th>Ultimo mese con dati</th><th>Profili registrati</th><th>Stato</th></tr></thead><tbody>${socialOverviewRows||'<tr><td colspan="4">Nessun cliente attivo.</td></tr>'}</tbody></table></div><p class="small muted" style="margin-top:12px">La verifica Meta utilizza soltanto un account pilota, se configurato da Cloudflare. Non riempie i report mensili, non pubblica post e non imposta valori mancanti a zero.</p></div><div class="card" style="margin-top:16px"><div class="section-title"><div><h2>Riepilogo automatico clienti</h2><span>Generato dai dati del gestionale, senza compilazione mensile. Non sono statistiche social.</span></div><button class="btn btn-ghost" type="button" id="copyAutomaticReport">Copia riepilogo</button></div><div class="table-wrap"><table class="table"><thead><tr><th>Cliente</th><th>Canone</th><th>Da incassare (registrato)</th><th>Scaduto</th><th>Fine pacchetto</th></tr></thead><tbody>${automaticRows||'<tr><td colspan="5">Nessun cliente attivo.</td></tr>'}</tbody></table></div></div><div id="reportTrendPanel" style="margin-top:16px">${reportTrendPanel(items,firstClient)}</div><div class="card" style="margin-top:16px"><div class="section-title"><div><h2>Storico mensile complessivo</h2><span>I valori non registrati o pari a 0 vengono ignorati</span></div></div><div class="table-wrap"><table class="table"><thead><tr><th>Mese</th><th>Cliente</th><th>Follower</th><th>Reach</th><th>Views</th><th>Interazioni</th><th>Lead</th><th>Azioni</th></tr></thead><tbody>${historyRows||'<tr><td colspan="8" class="empty">Nessun mese registrato.</td></tr>'}</tbody></table></div></div>`;
+    $('#metaMultiMonth').onchange=()=>loadMultiMeta(clients);
+    loadMultiMeta(clients);
     $('#refreshMetaInsights').onclick=()=>loadLiveMetaInsights();
     $('#metaInsightsMonth').onchange=()=>loadLiveMetaInsights();
     loadLiveMetaInsights();
