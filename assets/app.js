@@ -396,7 +396,7 @@ function reportTrendPanel(items,clientId,metric='reach',platform='all'){
 }
 async function loadLiveMetaInsights(){
   const output=$('#metaLiveInsights'),month=$('#metaInsightsMonth')?.value,button=$('#refreshMetaInsights');
-  if(!output||!/^\\d{4}-\\d{2}$/.test(month||''))return;
+  if(!output||!/^\d{4}-\d{2}$/.test(month||''))return;
   if(button)button.disabled=true;
   output.textContent='Lettura statistiche Meta in corso…';
   try{
