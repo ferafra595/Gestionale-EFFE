@@ -14,7 +14,7 @@ async function guard(db,id,range){
     COALESCE((SELECT SUM(amount) FROM transactions WHERE payment_id=p.id),0) AS received
     FROM payments p WHERE p.client_id=? AND p.type='Canone' AND p.status<>'Annullato'
     AND COALESCE(p.period,substr(p.due_date,1,7)) IN (${marks})`).bind(id,...range).all()).results||[];
-  const blocked=paymentRows.filter(p=>Number(p.received)>0||p.status==='Pagato'||p.status==='Parzialmente pagato'||Number(p.auto_generated)!==1);
+  const blocked=paymentRows.filter(p=>Number(p.received)>0||!['Da pagare','Scaduto'].includes(p.status)||Number(p.auto_generated)!==1);
   const invoices=(await db.prepare(`SELECT id FROM invoices WHERE client_id=?
     AND (substr(COALESCE(issue_date,''),1,7) IN (${marks}) OR substr(COALESCE(due_date,''),1,7) IN (${marks}))
     AND COALESCE(status,'') NOT IN ('Annullata','Bozza') LIMIT 1`).bind(id,...range,...range).all()).results||[];
@@ -67,9 +67,9 @@ export async function onRequestPost({env,params,request}){
   if(blocked.length)return out({error:'Esistono rate già incassate, parzialmente incassate o create manualmente in questo periodo. Verifica prima i pagamenti.'},409);
   if(invoices.length)return out({error:'Esistono fatture emesse per uno dei mesi selezionati. Non posso sospendere automaticamente un importo già fatturato.'},409);
   const reason=String(body.reason||'').trim().slice(0,200)||null;
-  const openAuto=paymentRows.filter(p=>Number(p.auto_generated)===1&&!['Pagato','Parzialmente pagato'].includes(p.status));
+  const openAuto=paymentRows.filter(p=>Number(p.auto_generated)===1&&['Da pagare','Scaduto'].includes(p.status));
   const statements=[db.prepare('INSERT INTO client_billing_pauses(client_id,start_month,end_month,reason) VALUES(?,?,?,?)').bind(id,start,end,reason)];
-  for(const p of openAuto)statements.push(db.prepare('DELETE FROM payments WHERE id=? AND auto_generated=1').bind(p.id));
+  for(const p of openAuto)statements.push(db.prepare(`DELETE FROM payments WHERE id=? AND auto_generated=1 AND status IN ('Da pagare','Scaduto') AND NOT EXISTS(SELECT 1 FROM payment_receipts WHERE payment_id=payments.id) AND NOT EXISTS(SELECT 1 FROM transactions WHERE payment_id=payments.id)`).bind(p.id));
   await db.batch(statements);
   return out({ok:true,excluded_months:range.length,removed_open_installments:openAuto.length,pauses:await list(db,id)});
 }
