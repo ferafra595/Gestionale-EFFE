@@ -30,6 +30,13 @@ export async function onRequestPost({env}){
     return Response.json({ok:true,current_period:nowPeriod,payments_created:0,payments_updated:0,payments_removed:Number(removedInactive.meta?.changes||0)});
   }
 
+  // Le pause sono esclusioni temporanee dal canone, non cancellazioni dei rapporti.
+  // Nelle installazioni senza archivio pause questo blocco rimane compatibile.
+  const hasPauses=await db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='client_billing_pauses'").first();
+  const pauseRows=hasPauses?(await db.prepare(
+    "SELECT client_id,start_month,end_month FROM client_billing_pauses WHERE end_month<=? OR start_month<=?"
+  ).bind(nowPeriod,nowPeriod).all()).results||[]:[];
+  const paused=(clientId,period)=>pauseRows.some(x=>Number(x.client_id)===Number(clientId)&&period>=x.start_month&&period<=x.end_month);
   const ids=clients.map(c=>Number(c.id)).filter(Boolean);
   const placeholders=ids.map(()=>'?').join(',');
   const payments=(await db.prepare(`
@@ -47,7 +54,7 @@ export async function onRequestPost({env}){
     const start=monthOf(c.package_start_date)||monthOf(c.start_date),rawEnd=monthOf(c.package_end_date)||monthOf(c.end_date);
     if(!start||start>nowPeriod)continue;
     const end=rawEnd&&rawEnd<nowPeriod?rawEnd:nowPeriod;
-    const valid=new Set(periodsBetween(start,end)),rows=byClient.get(String(c.id))||[];
+    const valid=new Set(periodsBetween(start,end).filter(period=>!paused(c.id,period))),rows=byClient.get(String(c.id))||[];
     const rowByPeriod=new Map();
     for(const p of rows){const pp=p.period||monthOf(p.due_date)||monthOf(p.paid_date);if(pp&&!rowByPeriod.has(pp))rowByPeriod.set(pp,p)}
 
