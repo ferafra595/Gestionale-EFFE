@@ -29,12 +29,11 @@ export async function onRequestGet({env}){
   packageRows.forEach(x=>actions.push({type:'package',level:'warn',title:`Pacchetto in scadenza · ${x.name}`,text:`Termina il ${x.package_end_date}`,page:'deadlines',date:x.package_end_date}));
   const leadRows=(await db.prepare(`SELECT id,name,next_contact,stage FROM leads WHERE COALESCE(stage,'') NOT IN ('Cliente','Perso') AND next_contact IS NOT NULL AND next_contact<=? ORDER BY next_contact LIMIT 6`).bind(now).all()).results||[];
   leadRows.forEach(x=>actions.push({type:'lead',level:'info',title:`Follow-up CRM · ${x.name}`,text:`${x.stage||'Lead'} · contatto previsto ${x.next_contact}`,page:'leads',date:x.next_contact}));
-  const reportRows=(await db.prepare(`SELECT c.id,c.name FROM clients c WHERE c.status='Attivo' AND NOT EXISTS(SELECT 1 FROM reports r WHERE r.client_id=c.id AND r.period=?) ORDER BY c.name LIMIT 6`).bind(month).all()).results||[];
-  reportRows.forEach(x=>actions.push({type:'report',level:'info',title:`Report mese mancante · ${x.name}`,text:`Nessun report registrato per ${month}`,page:'reports',date:now}));
+  // I report social non compilati non sono automaticamente attività urgenti: richiedono una fonte dati connessa.
   actions.sort((a,b)=>String(a.date||'').localeCompare(String(b.date||'')));
 
   const ov=Number(overdue.results?.[0]?.v||0),en=Number(ending.results?.[0]?.v||0),ld=Number(openLeads.results?.[0]?.v||0),dr=Number(dueLeads.results?.[0]?.v||0),mr=Number(missingReports.results?.[0]?.v||0);
-  const health=Math.max(0,Math.min(100,100-ov*12-en*5-dr*3-Math.min(mr,10)*1.5));
+  const health=Math.max(0,Math.min(100,100-ov*12-en*5-dr*3));
   return Response.json({
     revenueMonth:Number(rev.results?.[0]?.v||0),
     profitMonth:Number(rev.results?.[0]?.v||0)-Number(cost.results?.[0]?.v||0),
