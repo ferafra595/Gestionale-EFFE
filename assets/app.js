@@ -32,15 +32,15 @@ async function copyKiraBriefing(){
   const button=$('#copyKiraBriefing');
   if(button){button.disabled=true;button.textContent='Preparazione briefing…'}
   try{
-    const [dashboardData,deadlinesData,tasksData,contentData]=await Promise.all([
-      api('/api/dashboard'),api('/api/deadlines'),api('/api/data/tasks'),api('/api/data/content')
+    const [dashboardData,deadlinesData,workItems]=await Promise.all([
+      api('/api/dashboard'),api('/api/deadlines'),api('/api/kira/work-items')
     ]);
     const isOpen=x=>!['completato','completata','annullato','annullata','archiviato','pubblicato'].includes(String(x||'').trim().toLowerCase());
     const safe=x=>String(x??'').replace(/[\r\n\t]+/g,' ').slice(0,180);
-    const tasks=(tasksData.items||[]).filter(x=>isOpen(x.status)).slice(0,50).map(x=>
+    const tasks=(workItems.tasks||[]).filter(x=>isOpen(x.status)).slice(0,50).map(x=>
       '- '+safe(x.client_name||'Agenzia')+' | '+safe(x.title)+' | '+safe(x.priority||'')+' | '+safe(x.due_date||'senza data')+' | '+safe(x.status||'')
     );
-    const content=(contentData.items||[]).filter(x=>isOpen(x.status)).slice(0,50).map(x=>
+    const content=(workItems.content||[]).filter(x=>isOpen(x.status)).slice(0,50).map(x=>
       '- '+safe(x.client_name||'Agenzia')+' | '+safe(x.title||x.type||'Contenuto')+' | '+safe(x.type||'')+' | '+safe(x.date||'senza data')+' | '+safe(x.status||'')
     );
     const deadlines=(deadlinesData.items||[]).slice(0,35).map(x=>
