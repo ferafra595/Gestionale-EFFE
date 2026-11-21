@@ -66,7 +66,7 @@ async function discover(token){
   }
   return {ok:true,accounts:entries};
 }
-function normalizeName(v){return String(v||'').normalize('NFD').replace(/[\\u0300-\\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]/g,'')}
+function normalizeName(v){return String(v||'').normalize('NFD').toLowerCase().replace(/[^a-z0-9]/g,'')}
 const knownAliases={
   kineosal:'kineosalmesoraca',
   maurizioboutique:'maurizioboutique',
