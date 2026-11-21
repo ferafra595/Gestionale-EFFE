@@ -36,7 +36,7 @@ async function copyKiraBriefing(){
       api('/api/dashboard'),api('/api/deadlines'),api('/api/data/tasks'),api('/api/data/content')
     ]);
     const isOpen=x=>!['completato','completata','annullato','annullata','archiviato','pubblicato'].includes(String(x||'').trim().toLowerCase());
-    const safe=x=>String(x??'').replace(/[\\r\\n\\t]+/g,' ').slice(0,180);
+    const safe=x=>String(x??'').replace(/[\r\n\t]+/g,' ').slice(0,180);
     const tasks=(tasksData.items||[]).filter(x=>isOpen(x.status)).slice(0,50).map(x=>
       '- '+safe(x.client_name||'Agenzia')+' | '+safe(x.title)+' | '+safe(x.priority||'')+' | '+safe(x.due_date||'senza data')+' | '+safe(x.status||'')
     );
