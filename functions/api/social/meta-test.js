@@ -17,7 +17,8 @@ export async function onRequestGet({env}){
   url.searchParams.set('fields','id,username,followers_count,media_count');
   const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),7000);
   try{
-    const response=await fetch(url,{headers:{Authorization:'Bearer '+token,Accept:'application/json'},signal:controller.signal,redirect:'error'});
+    const response=await fetch(url,{headers:{Authorization:'Bearer '+token,Accept:'application/json'},signal:controller.signal,redirect:'manual'});
+    if(response.status>=300&&response.status<400)return reply({connected:false,status:'meta_redirect',message:'Meta ha richiesto un reindirizzamento inatteso. Nessuna credenziale è stata inoltrata.'},502);
     const body=await response.json().catch(()=>({}));
     if(!response.ok){
       // Do not return Meta's raw errors (some include private account details).
