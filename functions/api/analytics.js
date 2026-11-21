@@ -26,6 +26,11 @@ export async function onRequestGet({env}){
     db.prepare(`SELECT COUNT(*) v FROM leads`),db.prepare(`SELECT COALESCE(SUM(purchase_cost),0) v FROM equipment`),db.prepare(`SELECT * FROM projects`),db.prepare(`SELECT * FROM payment_receipts`)
   ]);
   const clients=cr.results||[],services=sr.results||[],invoices=ir.results||[],payments=pr.results||[],transactions=tr.results||[],contracts=cor.results||[],projects=pjr.results||[],receipts=rr.results||[];
+  const hasPauses=Boolean(await db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='client_billing_pauses'").first());
+  const pausedRows=hasPauses?(await db.prepare("SELECT client_id,start_month,end_month FROM client_billing_pauses").all()).results||[]:[];
+  const isPaused=(clientId,period)=>pausedRows.some(x=>String(x.client_id)===String(clientId)&&period>=x.start_month&&period<=x.end_month);
+  const thisMonth=today().slice(0,7);
+
   const paymentProgress=p=>{
     const receiptAmount=receipts.filter(r=>String(r.payment_id)===String(p.id)).reduce((s,x)=>s+n(x.amount),0);
     const legacyAmount=transactions.filter(t=>String(t.payment_id)===String(p.id)).reduce((s,x)=>s+n(x.amount),0);
@@ -49,7 +54,11 @@ export async function onRequestGet({env}){
     // Valore fino al 31/12: solo le mensilità che ricadono nell'anno corrente,
     // dalla data di inizio del pacchetto (o dal 1/1 se iniziato prima), rispettando un'eventuale fine anticipata.
     const monthsToYearEnd=recurringMonthsToYearEnd(pkgStart,pkgEnd);
-    const recurringToYearEnd=n(c.monthly_value)*monthsToYearEnd;
+    const recurringToYearEnd=n(c.monthly_value)*Math.max(0,monthsToYearEnd-pausedRows.filter(p=>String(p.client_id)===cid).reduce((sum,p)=>{
+      const year=String(new Date().getFullYear()),start=String(pkgStart||'' ).slice(0,7),end=String(pkgEnd||'').slice(0,7)||year+'-12';
+      const a=[p.start_month,year+'-01',start].sort().at(-1),b=[p.end_month,year+'-12',end].sort()[0];
+      return sum+(a<=b?monthCountBetween(a+'-01',b+'-01'):0)
+    },0));
     // Una tantum: i servizi senza data propria usano la data inizio pacchetto; i progetti usano start_date/deadline/created_at.
     const oneTimeServicesThisYear=(pkgStart&&oneTimeFallsInCurrentYear(pkgStart))?oneTimeServicesValue:0;
     const projectsThisYear=clientProjects.filter(p=>oneTimeFallsInCurrentYear(p.start_date||p.deadline||p.created_at)).reduce((s,x)=>s+n(x.value),0);
@@ -60,9 +69,9 @@ export async function onRequestGet({env}){
     const monthsActive=(pkgStart&&pkgStart<=activeUntil)?monthCountBetween(pkgStart,activeUntil):0;
     const avgActualMonthly=monthsActive?income/monthsActive:0;
     const monthly=[];for(let i=11;i>=0;i--){const d=new Date();d.setDate(1);d.setMonth(d.getMonth()-i);const mk=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`,mm=tx.filter(x=>String(x.date||'').slice(0,7)===mk);monthly.push({month:mk,revenue:mm.filter(x=>x.direction==='Entrata').reduce((s,x)=>s+n(x.amount),0),expense:mm.filter(x=>x.direction==='Uscita').reduce((s,x)=>s+n(x.amount),0)})}
-    return {id:c.id,name:c.name,status:c.status,relationship_type:c.relationship_type||'',packageStart:pkgStart,packageEnd:pkgEnd,monthlyValue:n(c.monthly_value),annualRecurring:twelveMonthValue,remainingYearValue:yearEndValue,fullYearValue:recurring12,oneTimeValue,projectValue,oneTimeServicesValue,packageMonths,packageTotalValue,monthsActive,avgActualMonthly,monthsToYearEnd,recurringToYearEnd,invoiceIssued:inv.reduce((s,x)=>s+n(x.total),0),invoicePaid:inv.filter(x=>/pagata/i.test(x.status||'')).reduce((s,x)=>s+n(x.total),0),invoiceOutstanding:inv.filter(x=>!/pagata|annullata/i.test(x.status||'')).reduce((s,x)=>s+n(x.total),0),paymentsPaid:pp.filter(x=>!isCancelled(x.status)).reduce((s,x)=>s+paymentProgress(x).paid,0),paymentsPending:pp.filter(x=>!/pagato|annull/i.test(x.status||'')).reduce((s,x)=>s+paymentProgress(x).residual,0),overduePayments:pp.filter(x=>!/pagato|annull/i.test(x.status||'')&&x.due_date&&x.due_date<today()).reduce((s,x)=>s+paymentProgress(x).residual,0),actualIncome:income,actualExpense:expense,netActual:income-expense,social:{...social,total:social.posts+social.reels+social.stories},contractEnd:ct?.end_date||'',services:sv.map(x=>x.custom_name||x.service_name||'Servizio').filter(Boolean),monthly};
+    return {id:c.id,name:c.name,status:c.status,pausedCurrentMonth:isPaused(c.id,thisMonth),relationship_type:c.relationship_type||'',packageStart:pkgStart,packageEnd:pkgEnd,monthlyValue:n(c.monthly_value),annualRecurring:twelveMonthValue,remainingYearValue:yearEndValue,fullYearValue:recurring12,oneTimeValue,projectValue,oneTimeServicesValue,packageMonths,packageTotalValue,monthsActive,avgActualMonthly,monthsToYearEnd,recurringToYearEnd,invoiceIssued:inv.reduce((s,x)=>s+n(x.total),0),invoicePaid:inv.filter(x=>/pagata/i.test(x.status||'')).reduce((s,x)=>s+n(x.total),0),invoiceOutstanding:inv.filter(x=>!/pagata|annullata/i.test(x.status||'')).reduce((s,x)=>s+n(x.total),0),paymentsPaid:pp.filter(x=>!isCancelled(x.status)).reduce((s,x)=>s+paymentProgress(x).paid,0),paymentsPending:pp.filter(x=>!/pagato|annull/i.test(x.status||'')).reduce((s,x)=>s+paymentProgress(x).residual,0),overduePayments:pp.filter(x=>!/pagato|annull/i.test(x.status||'')&&x.due_date&&x.due_date<today()).reduce((s,x)=>s+paymentProgress(x).residual,0),actualIncome:income,actualExpense:expense,netActual:income-expense,social:{...social,total:social.posts+social.reels+social.stories},contractEnd:ct?.end_date||'',services:sv.map(x=>x.custom_name||x.service_name||'Servizio').filter(Boolean),monthly};
   });
-  const active=clients.filter(c=>c.status==='Attivo'),activeIds=new Set(active.map(c=>String(c.id))),agencyTx=transactions.filter(x=>!x.client_id||activeIds.has(String(x.client_id))),mrr=active.reduce((s,c)=>s+n(c.monthly_value),0),actualIncome=agencyTx.filter(x=>x.direction==='Entrata').reduce((s,x)=>s+n(x.amount),0),actualExpense=agencyTx.filter(x=>x.direction==='Uscita').reduce((s,x)=>s+n(x.amount),0),activeStats=clientStats.filter(c=>c.status==='Attivo');
+  const active=clients.filter(c=>c.status==='Attivo'),activeIds=new Set(active.map(c=>String(c.id))),agencyTx=transactions.filter(x=>!x.client_id||activeIds.has(String(x.client_id))),mrr=active.reduce((s,c)=>s+(isPaused(c.id,thisMonth)?0:n(c.monthly_value)),0),actualIncome=agencyTx.filter(x=>x.direction==='Entrata').reduce((s,x)=>s+n(x.amount),0),actualExpense=agencyTx.filter(x=>x.direction==='Uscita').reduce((s,x)=>s+n(x.amount),0),activeStats=clientStats.filter(c=>c.status==='Attivo');
   return Response.json({
     activeClients:active.length,totalClients:clients.length,mrr,
     annualProjection:activeStats.reduce((s,x)=>s+x.annualRecurring,0),

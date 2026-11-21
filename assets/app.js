@@ -217,11 +217,54 @@ async function clientPackage(client){
   const periodHtml=`<div class="social-pack-card"><div class="social-pack-head"><div><div class="eyebrow">PERIODO & PAGAMENTI</div><h3>Durata del pacchetto</h3><p class="small muted">Queste date sono la fonte principale dei pagamenti automatici. Fuori da questo periodo EFFE OS non genera canoni.</p></div><span class="badge info">Automatico</span></div><div class="form-grid"><div class="field"><label>Data inizio pacchetto</label><input class="input" id="packageStart" type="date" value="${esc(fresh.package_start_date||'')}"></div><div class="field"><label>Data fine pacchetto</label><input class="input" id="packageEnd" type="date" value="${esc(fresh.package_end_date||'')}"></div><div class="field"><label>Canone mensile</label><input class="input" id="packageMonthly" type="number" step="0.01" min="0" value="${Number(fresh.monthly_value||0)}"></div><div class="field"><label>Giorno scadenza</label><input class="input" id="packageBillingDay" type="number" min="1" max="31" value="${Number(fresh.billing_day||30)}"></div><div class="field"><label>Pagamenti automatici</label><select class="select" id="packageAutoBilling"><option value="1" ${Number(fresh.auto_billing??1)===1?'selected':''}>Attivi</option><option value="0" ${Number(fresh.auto_billing??1)===0?'selected':''}>Disattivi</option></select></div></div><div class="social-pack-foot"><span class="small muted">Dopo il salvataggio i pagamenti vengono riallineati automaticamente.</span><button class="btn btn-primary" id="savePackagePeriod">Salva pacchetto completo</button></div></div>`;
   const socialHtml=`<div class="social-pack-card" style="margin-top:16px"><div class="social-pack-head"><div><div class="eyebrow">GESTIONE SOCIAL</div><h3>Pacchetto contenuti mensile</h3><p class="small muted">Definisci una volta Post, Reel e Storie inclusi.</p></div><span class="badge info">${social.total} contenuti/mese</span></div><div class="social-pack-grid"><label><span>Post / Caroselli</span><input class="input" id="socialPosts" type="number" min="0" value="${social.posts}"></label><label><span>Reel</span><input class="input" id="socialReels" type="number" min="0" value="${social.reels}"></label><label><span>Storie</span><input class="input" id="socialStories" type="number" min="0" value="${social.stories}"></label></div><div class="social-pack-foot"><div class="field" style="margin:0;max-width:240px"><label>Valore interno Gestione Social</label><input class="input" id="socialPrice" type="number" step="0.01" min="0" value="${social.price}"></div><button class="btn btn-primary" id="saveSocialPack">Salva Gestione Social</button></div></div>`;
   modal(`Pacchetto — ${esc(client.name)}`,`${periodHtml}${socialHtml}<div class="section-title" style="margin-top:22px"><div><h2>Altri servizi attivi</h2><span class="small muted">Servizi personalizzati inclusi nel rapporto</span></div><button class="btn btn-primary" id="addPackageRow">＋ Aggiungi servizio</button></div><div class="list" id="packageList">${otherRows.map(r=>packageRow(r,sv.items||[])).join('')||'<div class="empty">Nessun altro servizio configurato.</div>'}</div>`,null);
+  await renderClientPausePanel(fresh);
   $('#savePackagePeriod').onclick=()=>savePackagePeriod(fresh);
   $('#saveSocialPack').onclick=()=>saveSocialPackage(client,socialService,socialRow);
   $('#addPackageRow').onclick=()=>packageItemForm(client,(sv.items||[]).filter(x=>!/social media management|produzione reel|post \/ caroselli|stories/i.test(x.name||'')));
   $$('.editPack').forEach(b=>b.onclick=()=>packageItemForm(client,sv.items||[],otherRows.find(x=>x.id==b.dataset.id)));
   $$('.delPack').forEach(b=>b.onclick=async()=>{if(confirm('Eliminare questo servizio dal pacchetto?')){await api('/api/data/client_services/'+b.dataset.id,{method:'DELETE'});closeModal();clientPackage(client)}});
+}
+
+async function renderClientPausePanel(client){
+  const original=$('#savePackagePeriod')?.closest('.social-pack-card');
+  if(!original)return;
+  let panel=$('#clientPausePanel');
+  if(!panel){panel=document.createElement('div');panel.className='social-pack-card';panel.id='clientPausePanel';panel.style.marginTop='16px';original.after(panel)}
+  panel.textContent='Caricamento sospensioni…';
+  try{
+    const data=await api('/api/clients/'+client.id+'/pauses');
+    if(!$('#clientPausePanel'))return;
+    const current=data.current_month||monthKey();
+    const title='<div class="social-pack-head"><div><div class="eyebrow">SOSPENSIONI CANONE</div><h3>Metti in pausa per uno o più mesi</h3><p class="small muted">Le rate automatiche aperte dei mesi sospesi non saranno più richieste. Incassi e fatture già emesse restano intatti.</p></div></div>';
+    if(!data.initialized){
+      panel.innerHTML=title+'<button type="button" class="btn btn-primary" id="initializePauses">Attiva gestione sospensioni</button>';
+      $('#initializePauses').onclick=async()=>{
+        const b=$('#initializePauses');b.disabled=true;
+        try{await api('/api/clients/'+client.id+'/pauses',{method:'POST',body:JSON.stringify({action:'setup'})});await renderClientPausePanel(client);toast('Gestione sospensioni attivata')}
+        catch(e){b.disabled=false;toast(e.message)}
+      };
+      return;
+    }
+    const old=(data.pauses||[]).map(p=>'<div class="metric-row" style="padding:10px 0;justify-content:space-between;align-items:center"><div><strong>'+esc(p.start_month)+' → '+esc(p.end_month)+'</strong><div class="small muted">'+esc(p.reason||'Canone sospeso')+(p.end_month<current?' · Conclusa':'')+'</div></div>'+(p.end_month>=current?'<button type="button" class="btn btn-ghost removePause" data-id="'+Number(p.id)+'">Riattiva</button>':'')+'</div>').join('');
+    panel.innerHTML=title+'<div class="form-grid"><div class="field"><label>Da mese</label><input class="input" type="month" id="pauseFrom" min="'+esc(current)+'" value="'+esc(current)+'"></div><div class="field"><label>A mese (incluso)</label><input class="input" type="month" id="pauseTo" min="'+esc(current)+'" value="'+esc(current)+'"></div><div class="field span-2"><label>Motivo (facoltativo)</label><input id="pauseReason" class="input" maxlength="200" placeholder="Es. attività sospesa per lavori"></div></div><div class="social-pack-foot"><span class="small muted">Le fatture emesse e le rate incassate impediscono la sospensione automatica del relativo mese.</span><button type="button" id="createPause" class="btn btn-primary">Sospendi canone</button></div><div style="margin-top:12px">'+(old||'<p class="small muted">Nessuna sospensione registrata.</p>')+'</div>';
+    $('#createPause').onclick=async()=>{
+      const from=$('#pauseFrom').value,to=$('#pauseTo').value;
+      if(!from||!to||to<from)return toast('Seleziona un intervallo valido');
+      if(!confirm('Sospendere il canone da '+from+' a '+to+'? Le rate automatiche ancora aperte saranno escluse dagli importi da riscuotere.'))return;
+      const b=$('#createPause');b.disabled=true;b.textContent='Salvataggio…';
+      try{
+        const result=await api('/api/clients/'+client.id+'/pauses',{method:'POST',body:JSON.stringify({action:'pause',start_month:from,end_month:to,reason:$('#pauseReason').value})});
+        await syncPayments(true);clearApiCache();await renderClientPausePanel(client);
+        toast('Canone sospeso per '+result.excluded_months+' mesi. Rate automatiche aperte escluse: '+result.removed_open_installments)
+      }catch(e){b.disabled=false;b.textContent='Sospendi canone';toast(e.message)}
+    };
+    $('.removePause').forEach(b=>b.onclick=async()=>{
+      if(!confirm('Riattivare il canone? I pagamenti automatici potranno tornare dovuti.'))return;
+      b.disabled=true;
+      try{await api('/api/clients/'+client.id+'/pauses',{method:'POST',body:JSON.stringify({action:'resume',pause_id:Number(b.dataset.id)})});await syncPayments(true);clearApiCache();await renderClientPausePanel(client);toast('Canone riattivato')}
+      catch(e){b.disabled=false;toast(e.message)}
+    });
+  }catch(e){panel.textContent='Errore lettura sospensioni: '+String(e.message||e)}
 }
 function isSocialBundle(r){try{const n=JSON.parse(r?.notes||'{}');return n.kind==='social_package'}catch{return false}}
 function parseSocialBundle(r){let n={};try{n=JSON.parse(r?.notes||'{}')}catch{};const posts=Number(n.posts||0),reels=Number(n.reels||0),stories=Number(n.stories||0);return {posts,reels,stories,total:posts+reels+stories,price:Number(r?.price||0)}}
@@ -620,7 +663,7 @@ function reportEditor(item={}){
 function clientStatsPanel(c){
   if(!c)return '<div class="card empty">Seleziona un cliente per vedere le statistiche.</div>';
   const monthlyRows=(c.monthly||[]).map(m=>`<tr><td>${esc(m.month)}</td><td>${fmtEUR(m.revenue)}</td><td>${fmtEUR(m.expense)}</td><td>${fmtEUR(Number(m.revenue)-Number(m.expense))}</td></tr>`).join('');
-  return `<div class="grid grid-kpi" style="margin-top:16px">${kpi('Canone mensile',fmtEUR(c.monthlyValue),'Pacchetto attuale')}${kpi('Valore 12 mesi + una tantum',fmtEUR(c.annualRecurring),'12 mensilità dalla partenza + lavori singoli')}${kpi('Valore fino al 31/12',fmtEUR(c.remainingYearValue),'Dalla data di inizio al 31 dicembre + una tantum dell’anno')}${kpi('Incassato',fmtEUR(c.actualIncome),'Entrate registrate')}${kpi('Uscite attribuite',fmtEUR(c.actualExpense),'Costi del cliente')}${kpi('Netto registrato',fmtEUR(c.netActual),'Entrate meno uscite')}${kpi('Da incassare',fmtEUR(c.paymentsPending),'Pagamenti aperti')}</div>
+  return `<div class="grid grid-kpi" style="margin-top:16px">${kpi('Canone mensile',fmtEUR(c.pausedCurrentMonth?0:c.monthlyValue),c.pausedCurrentMonth?'Sospeso per il mese corrente':'Pacchetto attuale')}${kpi('Valore 12 mesi + una tantum',fmtEUR(c.annualRecurring),'12 mensilità dalla partenza + lavori singoli')}${kpi('Valore fino al 31/12',fmtEUR(c.remainingYearValue),'Dalla data di inizio al 31 dicembre + una tantum dell’anno')}${kpi('Incassato',fmtEUR(c.actualIncome),'Entrate registrate')}${kpi('Uscite attribuite',fmtEUR(c.actualExpense),'Costi del cliente')}${kpi('Netto registrato',fmtEUR(c.netActual),'Entrate meno uscite')}${kpi('Da incassare',fmtEUR(c.paymentsPending),'Pagamenti aperti')}</div>
   <div class="grid two-col" style="margin-top:16px"><div class="card"><div class="section-title"><div><h2>Situazione economica</h2><span>${esc(c.name)}</span></div></div><div class="finance-detail-grid"><div><span>Fatture emesse</span><b>${fmtEUR(c.invoiceIssued)}</b></div><div><span>Fatture pagate</span><b>${fmtEUR(c.invoicePaid)}</b></div><div><span>Pagamenti confermati</span><b>${fmtEUR(c.paymentsPaid)}</b></div><div><span>Scaduto / insoluto</span><b>${fmtEUR(c.overduePayments)}</b></div><div><span>Valore 12 mesi + una tantum</span><b>${fmtEUR(c.annualRecurring)}</b></div><div><span>Solo canone su 12 mesi</span><b>${fmtEUR(c.fullYearValue)}</b></div><div><span>Periodo pacchetto</span><b>${c.packageStart?fmtDate(c.packageStart):'—'} → ${c.packageEnd?fmtDate(c.packageEnd):'Aperto'}</b></div></div></div><div class="card"><div class="section-title"><div><h2>Pacchetto cliente</h2><span>Configurazione attiva</span></div></div><div class="metric-row"><div class="metric"><b>${c.social?.posts||0}</b><span>post / mese</span></div><div class="metric"><b>${c.social?.reels||0}</b><span>reel / mese</span></div><div class="metric"><b>${c.social?.stories||0}</b><span>storie / mese</span></div><div class="metric"><b>${c.social?.total||0}</b><span>contenuti previsti</span></div></div><div class="small muted" style="margin-top:18px">Servizi: ${(c.services||[]).map(esc).join(' · ')||'Nessun servizio configurato'}</div></div></div>
   <div class="card" style="margin-top:16px"><div class="section-title"><div><h2>Andamento economico</h2><span>Ultimi 12 mesi</span></div></div><div class="table-wrap"><table class="table client-month-table"><thead><tr><th>Mese</th><th>Entrate</th><th>Uscite</th><th>Netto</th></tr></thead><tbody>${monthlyRows}</tbody></table></div></div>`;
 }

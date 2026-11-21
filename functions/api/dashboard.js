@@ -2,10 +2,12 @@ export async function onRequestGet({env}){
   const db=env.DB;if(!db)return Response.json({error:'Binding D1 DB mancante'},{status:500});
   const nowDate=new Date(),month=nowDate.toISOString().slice(0,7),now=nowDate.toISOString().slice(0,10),tomorrow=new Date(Date.now()+864e5).toISOString().slice(0,10),in30=new Date(Date.now()+30*864e5).toISOString().slice(0,10);
   const activeTx=`(transactions.client_id IS NULL OR EXISTS(SELECT 1 FROM clients cta WHERE cta.id=transactions.client_id AND cta.status='Attivo'))`;
+  const hasPauses=Boolean(await db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='client_billing_pauses'").first());
+  const mrrPauseFilter=hasPauses?" AND NOT EXISTS(SELECT 1 FROM client_billing_pauses bp WHERE bp.client_id=clients.id AND ? BETWEEN bp.start_month AND bp.end_month)":'';
   const qs=[
     db.prepare(`SELECT COALESCE(SUM(amount),0) v FROM transactions WHERE direction='Entrata' AND substr(date,1,7)=? AND ${activeTx}`).bind(month),
     db.prepare(`SELECT COALESCE(SUM(amount),0) v FROM transactions WHERE direction='Uscita' AND substr(date,1,7)=? AND ${activeTx}`).bind(month),
-    db.prepare(`SELECT COALESCE(SUM(monthly_value),0) v FROM clients WHERE status='Attivo' AND COALESCE(package_start_date,start_date)<=? AND (COALESCE(package_end_date,end_date) IS NULL OR COALESCE(package_end_date,end_date)>=?)`).bind(now,now),
+    db.prepare(`SELECT COALESCE(SUM(monthly_value),0) v FROM clients WHERE status='Attivo' AND COALESCE(package_start_date,start_date)<=? AND (COALESCE(package_end_date,end_date) IS NULL OR COALESCE(package_end_date,end_date)>=?)${mrrPauseFilter}`).bind(...(hasPauses?[now,now,month]:[now,now])),
     db.prepare(`SELECT COUNT(*) v FROM clients WHERE status='Attivo'`),
     db.prepare(`SELECT COALESCE(SUM(p.amount),0) v FROM payments p JOIN clients c ON c.id=p.client_id WHERE c.status='Attivo' AND COALESCE(p.period,substr(p.due_date,1,7))=? AND p.status<>'Annullato'`).bind(month),
     db.prepare(`SELECT COALESCE(SUM(CASE WHEN p.status='Pagato' AND COALESCE(r.received,0)+COALESCE(t.received,0)=0 THEN p.amount ELSE MIN(p.amount,COALESCE(r.received,0)+COALESCE(t.received,0)) END),0) v FROM payments p JOIN clients c ON c.id=p.client_id LEFT JOIN (SELECT payment_id,SUM(amount) received FROM payment_receipts GROUP BY payment_id) r ON r.payment_id=p.id LEFT JOIN (SELECT payment_id,SUM(amount) received FROM transactions WHERE payment_id IS NOT NULL GROUP BY payment_id) t ON t.payment_id=p.id WHERE c.status='Attivo' AND COALESCE(p.period,substr(p.due_date,1,7))=? AND p.status<>'Annullato'`).bind(month),
