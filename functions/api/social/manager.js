@@ -66,6 +66,30 @@ async function discover(token){
   }
   return {ok:true,accounts:entries};
 }
+function normalizeName(v){return String(v||'').normalize('NFD').replace(/[\\u0300-\\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]/g,'')}
+const knownAliases={
+  kineosal:'kineosalmesoraca',
+  maurizioboutique:'maurizioboutique',
+  vesuviana:'lavesuvianade',
+  brunoschipanisnc:'schipaniauto',
+  ristoranteoasi:'oasiristorante'
+};
+async function suggestions(db,token){
+  const available=await discover(token);
+  if(!available.ok)return available;
+  const clients=await db.prepare("SELECT id,name FROM clients WHERE status='Attivo' ORDER BY name").all();
+  const linked=await accounts(db),used=new Set(linked.map(x=>String(x.ig_user_id)));
+  const existing=new Set(linked.map(x=>Number(x.client_id)));
+  const proposals=[];
+  for(const c of clients.results||[]){
+    if(existing.has(Number(c.id)))continue;
+    const key=normalizeName(c.name);
+    const target=knownAliases[key]||key;
+    const matches=available.accounts.filter(a=>normalizeName(a.username)===target&&!used.has(a.ig_user_id));
+    if(matches.length===1)proposals.push({client_id:c.id,client_name:c.name,...matches[0]});
+  }
+  return {ok:true,suggestions:proposals};
+}
 function numberOrNull(v){return typeof v==='number'&&Number.isFinite(v)&&v>=0?v:null}
 function extract(data,name){
   const row=(data?.data||[]).find(x=>x.name===name);
@@ -108,6 +132,11 @@ export async function onRequestGet({request,env}){
     const found=await discover(tokenFrom(env));
     return response(found,found.ok?200:502);
   }
+  if(action==='suggest'){
+    if(!env.DB||!await tables(env.DB))return response({error:'Archivio Meta non inizializzato'},409);
+    const candidates=await suggestions(env.DB,tokenFrom(env));
+    return response(candidates,candidates.ok?200:502);
+  }
   if(action!=='status')return response({error:'Azione sconosciuta'},400);
   if(!validMonth(month))return response({error:'Mese non valido'},400);
   if(!env.DB)return response({error:'Binding DB mancante'},503);
@@ -136,6 +165,19 @@ export async function onRequestPost({request,env}){
     return response({ok:true});
   }
   if(!await tables(env.DB))return response({error:'Archivio Meta non inizializzato'},409);
+  if(action==='auto_link'){
+    if(body.confirm!==true)return response({error:'Conferma esplicita richiesta'},400);
+    const proposal=await suggestions(env.DB,tokenFrom(env));
+    if(!proposal.ok)return response({error:proposal.error},502);
+    const selected=new Set((Array.isArray(body.client_ids)?body.client_ids:[]).map(Number));
+    const candidates=proposal.suggestions.filter(x=>selected.has(Number(x.client_id)));
+    if(!candidates.length)return response({ok:true,linked:[]});
+    const queries=candidates.map(a=>env.DB.prepare(
+      "INSERT INTO social_meta_accounts(client_id,ig_user_id,fb_page_id,username) VALUES(?,?,?,?)"
+    ).bind(a.client_id,a.ig_user_id,a.fb_page_id,a.username));
+    try{await env.DB.batch(queries)}catch(_){return response({error:'Associazione non riuscita: ricontrollare i collegamenti attivi'},409)}
+    return response({ok:true,linked:candidates.map(x=>({client_id:x.client_id,username:x.username}))});
+  }
   if(action==='link'){
     const clientId=Number(body.client_id),ig=String(body.ig_user_id||''),page=String(body.fb_page_id||'');
     if(!Number.isSafeInteger(clientId)||clientId<1||!validId(ig)||!validId(page))
@@ -148,6 +190,8 @@ export async function onRequestPost({request,env}){
     if(!candidate)return response({error:'Account non presente fra quelli autorizzati da Meta'},403);
     const belongs=await env.DB.prepare('SELECT client_id FROM social_meta_accounts WHERE ig_user_id=?').bind(ig).first();
     if(belongs&&Number(belongs.client_id)!==clientId)return response({error:'Account già associato a un altro cliente'},409);
+    const current=await env.DB.prepare('SELECT ig_user_id FROM social_meta_accounts WHERE client_id=?').bind(clientId).first();
+    if(current&&String(current.ig_user_id)!==ig)return response({error:'Cliente già collegato. Evitare di sovrascrivere lo storico: contattare l’amministratore.'},409);
     await env.DB.prepare(`INSERT INTO social_meta_accounts(client_id,ig_user_id,fb_page_id,username)
       VALUES(?,?,?,?) ON CONFLICT(client_id) DO UPDATE SET
       ig_user_id=excluded.ig_user_id,fb_page_id=excluded.fb_page_id,username=excluded.username,updated_at=CURRENT_TIMESTAMP`)
