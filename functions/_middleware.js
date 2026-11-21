@@ -1,6 +1,6 @@
 export async function onRequest(context) {
   const url = new URL(context.request.url);
-  if (!url.pathname.startsWith('/api/') || ['/api/login','/api/session'].includes(url.pathname)) return context.next();
+  if (!url.pathname.startsWith('/api/') || ['/api/login','/api/session','/api/kira/briefing'].includes(url.pathname)) return context.next();
   const cookie = context.request.headers.get('Cookie') || '';
   const token = cookie.match(/effe_session=([^;]+)/)?.[1];
   if (!token || !(await verifyToken(token, context.env.SESSION_SECRET || 'change-me'))) return Response.json({error:'Non autorizzato'},{status:401});
