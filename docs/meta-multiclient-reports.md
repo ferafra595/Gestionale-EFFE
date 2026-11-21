@@ -10,8 +10,9 @@ Questa fase si appoggia al token `META_IG_ACCESS_TOKEN` **già configurato in Cl
 2. Aprire **Report → Report Instagram — tutti i clienti**.
 3. Cliccare **Attiva archivio Meta** una sola volta. Questo crea *soltanto* le due nuove tabelle D1 `social_meta_accounts` e `social_meta_months` (CREATE TABLE IF NOT EXISTS). Non modifica le tabelle esistenti dei clienti e i report precedenti.
 4. Cliccare **Trova associazioni**. Il server usa `/me/accounts` (100 record massimo in questa fase) per individuare gli account Instagram associati alle Pagine Facebook accessibili. La lista proposta comprende **solo** nomi esatti o corrispondenze esplicitamente note: KineoSal, Maurizio Boutique, La Vesuviana, Schipani Auto, Ristorante Oasi. Verificare le proposte e confermare quelle corrette.
-5. Cliccare **Aggiorna tutti i clienti collegati**. Recupera in una sola operazione le metriche di ciascun profilo e crea/aggiorna uno snapshot mensile indipendente.
-6. **Esporta CSV** per scaricare i dati mensili di tutti i profili aggiornati con un solo pulsante.
+5. Per gli account autorizzati ma non riconosciuti automaticamente, utilizzare **Associa manualmente** per scegliere il cliente EFFE e il profilo Instagram dalla lista restituita direttamente da Meta. Il sistema richiede conferma esplicita e blocca la sostituzione di profili già collegati.
+6. Cliccare **Aggiorna tutti i clienti collegati**. Recupera in una sola operazione le metriche di ciascun profilo e crea/aggiorna uno snapshot mensile indipendente.
+7. **Esporta CSV** per scaricare i dati mensili di tutti i profili aggiornati con un solo pulsante.
 
 ## Provenienza, integrità e limiti
 - Le metriche mensili Instagram (reach, views, total_interactions) vengono lette dalla risposta `insights?period=day&metric_type=total_value&since=...&until=...` e sono archiviate nel mese richiesto, con data di fine esclusiva.
