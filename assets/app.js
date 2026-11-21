@@ -483,6 +483,7 @@ async function loadMultiMeta(clients){
     area.innerHTML='<div class="section-title"><div><h3>Account Instagram clienti</h3><span>'+linked.size+' profili associati · '+saved.size+' riepiloghi per '+esc(month)+'</span></div></div>'+
       '<div class="actions" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">'+
       '<button class="btn btn-ghost" id="metaMultiSuggestions">Trova associazioni</button>'+
+      '<button class="btn btn-ghost" id="metaMultiManual">Associa manualmente</button>'+
       '<button class="btn btn-primary" id="metaMultiSync" '+(!linked.size?'disabled':'')+'>Aggiorna tutti i clienti collegati</button>'+
       '<button class="btn btn-ghost" id="metaMultiCsv" '+(!saved.size?'disabled':'')+'>Esporta CSV</button></div>'+
       '<div id="metaMultiSuggestionArea" class="small muted"></div>'+
@@ -509,6 +510,30 @@ async function loadMultiMeta(clients){
           }catch(e){b.disabled=false;toast(e.message)}
         };
       }catch(e){display.textContent='Impossibile cercare le associazioni: '+e.message}
+    };
+    $('#metaMultiManual').onclick=async()=>{
+      const display=$('#metaMultiSuggestionArea');
+      display.textContent='Lettura degli account disponibili…';
+      try{
+        const d=await multiMetaRequest('/api/social/manager?action=discover');
+        if(!d.ok)throw new Error(d.error||'Permessi Meta insufficienti');
+        const possibleClients=clients.filter(x=>!linked.has(Number(x.id)));
+        const used=new Set((data.accounts||[]).map(x=>String(x.ig_user_id)));
+        const possibleProfiles=(d.accounts||[]).filter(x=>!used.has(String(x.ig_user_id)));
+        if(!possibleClients.length||!possibleProfiles.length){display.textContent='Nessun cliente o profilo disponibile da associare.';return}
+        display.innerHTML='<p>Seleziona il cliente e il profilo Instagram corretto. Non verrà cambiato alcun collegamento esistente.</p>'+
+          '<div class="form-grid"><div class="field"><label>Cliente EFFE</label><select class="select" id="metaManualClient">'+possibleClients.map(x=>'<option value="'+Number(x.id)+'">'+esc(x.name)+'</option>').join('')+'</select></div>'+
+          '<div class="field"><label>Account Meta autorizzato</label><select class="select" id="metaManualProfile">'+possibleProfiles.map((x,i)=>'<option value="'+i+'">'+esc(x.page_name)+' — @'+esc(x.username)+'</option>').join('')+'</select></div></div>'+
+          '<button class="btn btn-primary" id="metaManualSave">Conferma collegamento</button>';
+        $('#metaManualSave').onclick=async()=>{
+          const clientId=Number($('#metaManualClient').value),p=possibleProfiles[Number($('#metaManualProfile').value)];
+          if(!p||!clientId)return;
+          if(!confirm('Associare @'+p.username+' al cliente selezionato?'))return;
+          const button=$('#metaManualSave');button.disabled=true;
+          try{await multiMetaRequest('/api/social/manager',{action:'link',client_id:clientId,ig_user_id:p.ig_user_id,fb_page_id:p.fb_page_id});toast('Account collegato');loadMultiMeta(clients)}
+          catch(e){button.disabled=false;toast(e.message)}
+        };
+      }catch(e){display.textContent='Impossibile caricare i profili: '+String(e.message||e)}
     };
     $('#metaMultiSync').onclick=async()=>{
       const b=$('#metaMultiSync');b.disabled=true;b.textContent='Recupero dati in corso…';
