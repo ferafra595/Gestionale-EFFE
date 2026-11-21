@@ -12,7 +12,7 @@ async function guard(db,id,range){
   const paymentRows=(await db.prepare(`SELECT p.id,p.period,p.due_date,p.status,p.auto_generated,p.type,
     COALESCE((SELECT SUM(amount) FROM payment_receipts WHERE payment_id=p.id),0)+
     COALESCE((SELECT SUM(amount) FROM transactions WHERE payment_id=p.id),0) AS received
-    FROM payments p WHERE p.client_id=? AND p.type='Canone'
+    FROM payments p WHERE p.client_id=? AND p.type='Canone' AND p.status<>'Annullato'
     AND COALESCE(p.period,substr(p.due_date,1,7)) IN (${marks})`).bind(id,...range).all()).results||[];
   const blocked=paymentRows.filter(p=>Number(p.received)>0||p.status==='Pagato'||p.status==='Parzialmente pagato'||Number(p.auto_generated)!==1);
   const invoices=(await db.prepare(`SELECT id FROM invoices WHERE client_id=? AND substr(COALESCE(issue_date,due_date,''),1,7) IN (${marks})
