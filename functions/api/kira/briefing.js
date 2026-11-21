@@ -25,7 +25,6 @@ export async function onRequestGet({request,env}){
     const today=new Date().toISOString().slice(0,10);
     const pausedTable=Boolean(await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='client_billing_pauses'").first());
     const activeMonth=today.slice(0,7);
-    const mrrPredicate=pausedTable?" AND NOT EXISTS (SELECT 1 FROM client_billing_pauses p WHERE p.client_id=clients.id AND ? BETWEEN p.start_month AND p.end_month)":'';
     const [clients,payments,tasks,contents,packages,leads]=await env.DB.batch([
       env.DB.prepare("SELECT COUNT(*) AS count, COALESCE(ROUND(SUM(CASE WHEN "+(pausedTable?"NOT EXISTS (SELECT 1 FROM client_billing_pauses bp WHERE bp.client_id=clients.id AND ? BETWEEN bp.start_month AND bp.end_month)":"1=1")+" THEN COALESCE(monthly_value,0) ELSE 0 END),2),0) AS monthly_value FROM clients WHERE status='Attivo'").bind(...(pausedTable?[activeMonth]:[])),
       env.DB.prepare("SELECT COUNT(*) AS count, COALESCE(ROUND(SUM(p.amount),2),0) AS nominal_amount FROM payments p JOIN clients c ON c.id=p.client_id WHERE c.status='Attivo' AND p.status IN ('Da pagare','Scaduto','Parzialmente pagato') AND p.due_date<?").bind(today),
