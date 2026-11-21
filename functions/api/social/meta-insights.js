@@ -23,7 +23,8 @@ async function meta(path,params,token){
   const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),9500);
   try{
     const response=await fetch(url,{method:'GET',headers:{Authorization:'Bearer '+token,Accept:'application/json'},
-      signal:controller.signal,redirect:'error'});
+      signal:controller.signal,redirect:'manual'});
+    if(response.status>=300&&response.status<400)return {ok:false,error:'meta_redirect',status:response.status};
     const body=await response.json().catch(()=>null);
     if(!response.ok||!body||body.error){
       const status=Number(body?.error?.code)||null;
