@@ -28,17 +28,71 @@ function renderLogin(){$('#app').innerHTML=`<div class="login-shell"><form class
 function renderShell(){let sections='';for(const [section,id,label] of nav){if(section)sections+=`<div class="nav-section">${section}</div>`;sections+=`<button class="nav-item" data-page="${id}"><span class="nav-icon">${icons[id]}</span>${label}</button>`}$('#app').innerHTML=`<div class="shell"><aside class="sidebar" id="sidebar"><div class="brand"><img src="/assets/logo-white.png"><div><strong>EFFE OS</strong><small>Digital Strategy</small></div></div>${sections}</aside><main class="main"><header class="topbar"><button class="btn btn-ghost mobile-toggle" id="menuBtn">☰</button><div class="search"><span>⌕</span><input class="input" id="globalSearch" placeholder="Cerca clienti, lead, preventivi..."></div><div class="top-actions"><button class="btn btn-ghost hide-mobile" id="quickAdd">＋ Nuovo</button><button class="btn btn-ghost" id="logout">Esci</button></div></header><div class="content" id="content"></div></main></div>`;$$('.nav-item').forEach(b=>b.onclick=()=>navigate(b.dataset.page));$('#menuBtn').onclick=()=>$('#sidebar').classList.toggle('open');$('#logout').onclick=async()=>{await api('/api/logout',{method:'POST'});location.reload()};$('#quickAdd').onclick=()=>quickAdd();$('#globalSearch').addEventListener('input',debounce(globalSearch,250))}
 async function loadClients(){const d=await api('/api/data/clients');state.clients=d.items||[]}
 function navigate(page){if(!page)page='dashboard';if(location.hash.slice(1)!==page){location.hash=page;return}state.page=page;$$('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.page===page));$('#sidebar')?.classList.remove('open');if(page==='dashboard')return dashboard();if(page==='appointments')return appointmentsPage();if(page==='leads')return crmPage();if(page==='clients')return clientsPage();if(page==='deadlines')return deadlinesPage();if(page==='payments')return paymentsPage();if(page==='expenses')return financePage();if(page==='subscriptions')return subscriptionsPage();if(page==='quotes')return quotesPage();if(page==='documents')return documentsPage();if(page==='reports')return reportsPage();if(page==='analytics')return analyticsPage();if(page==='control')return controlPage();if(page==='settings')return settingsPage();if(meta[page])return genericPage(page);$('#content').innerHTML='<div class="empty">Sezione in preparazione.</div>'}
+async function copyKiraBriefing(){
+  const button=$('#copyKiraBriefing');
+  if(button){button.disabled=true;button.textContent='Preparazione briefing…'}
+  try{
+    const [dashboardData,deadlinesData,tasksData,contentData]=await Promise.all([
+      api('/api/dashboard'),api('/api/deadlines'),api('/api/data/tasks'),api('/api/data/content')
+    ]);
+    const isOpen=x=>!['completato','completata','annullato','annullata','archiviato','pubblicato'].includes(String(x||'').trim().toLowerCase());
+    const safe=x=>String(x??'').replace(/[\r\n\t]+/g,' ').slice(0,180);
+    const tasks=(tasksData.items||[]).filter(x=>isOpen(x.status)).slice(0,50).map(x=>
+      '- '+safe(x.client_name||'Agenzia')+' | '+safe(x.title)+' | '+safe(x.priority||'')+' | '+safe(x.due_date||'senza data')+' | '+safe(x.status||'')
+    );
+    const content=(contentData.items||[]).filter(x=>isOpen(x.status)).slice(0,50).map(x=>
+      '- '+safe(x.client_name||'Agenzia')+' | '+safe(x.title||x.type||'Contenuto')+' | '+safe(x.type||'')+' | '+safe(x.date||'senza data')+' | '+safe(x.status||'')
+    );
+    const deadlines=(deadlinesData.items||[]).slice(0,35).map(x=>
+      '- '+safe(x.kind||'Scadenza')+' | '+safe(x.client_name||'Agenzia')+' | '+safe(x.date||'')+' | '+safe(x.urgency||'')
+    );
+    const report=[
+      'K.I.R.A. — EFFE OS: briefing operativo esportato manualmente',
+      'Generato: '+new Date().toLocaleString('it-IT'),
+      'Clienti attivi: '+Number(dashboardData.activeClients||0),
+      'MRR: '+fmtEUR(dashboardData.mrr),
+      'Da incassare nel mese: '+fmtEUR(dashboardData.pendingMonth),
+      'Incassi scaduti (conteggio): '+Number(dashboardData.overduePayments||0),
+      'Lead da ricontattare: '+Number(dashboardData.dueLeads||0),
+      'Pacchetti in scadenza: '+Number(dashboardData.endingPackages||0),
+      'Report mancanti: '+Number(dashboardData.missingReports||0),
+      '',
+      'ATTIVITÀ APERTE (fino a 50):',...(tasks.length?tasks:['- Nessuna']),
+      '',
+      'CONTENUTI IN LAVORAZIONE (fino a 50):',...(content.length?content:['- Nessuno']),
+      '',
+      'SCADENZE (fino a 35):',...(deadlines.length?deadlines:['- Nessuna']),
+      '',
+      'Nota: riepilogo limitato, destinato esclusivamente alla chat privata K.I.R.A. Esclusi password, recapiti, indirizzi, documenti e note interne.'
+    ].join('\n');
+    try{
+      if(!navigator.clipboard?.writeText)throw new Error('Clipboard non disponibile');
+      await navigator.clipboard.writeText(report);
+      toast('Briefing copiato. Incollalo nella chat con K.I.R.A.');
+    }catch(clipboardError){
+      const blob=new Blob([report],{type:'text/plain;charset=utf-8'});
+      const link=document.createElement('a');const url=URL.createObjectURL(blob);
+      link.href=url;link.download='effe-briefing-kira.txt';document.body.append(link);link.click();link.remove();
+      setTimeout(()=>URL.revokeObjectURL(url),3000);
+      toast('Briefing scaricato. Puoi allegarlo alla chat con K.I.R.A.');
+    }
+  }catch(error){
+    toast('Impossibile preparare il briefing: '+String(error.message||error));
+  }finally{
+    if(button){button.disabled=false;button.textContent='Copia briefing per K.I.R.A.'}
+  }
+}
 async function dashboard(){
   try{
     try{await syncSubscriptions(false)}catch(e){console.warn('Sync abbonamenti dashboard:',e)}
     const d=await apiCached('/api/dashboard',12000);
     const actionHtml=(d.actions||[]).slice(0,10).map(a=>`<button class="decision-row" data-page="${esc(a.page||'dashboard')}"><span class="decision-dot ${esc(a.level||'info')}"></span><div class="grow"><div class="strong">${esc(a.title)}</div><div class="small muted">${esc(a.text||'')}</div></div><span class="badge ${esc(a.level||'info')}">${a.level==='danger'?'Urgente':a.level==='warn'?'Da vedere':'Azione'}</span></button>`).join('');
     $('#content').innerHTML=`${dashboardAppointmentsBlock(d.appointmentsToday||[],d.appointmentsTomorrow||[])}
-    <div class="hero dashboard-hero" style="margin-top:16px"><div><div class="eyebrow">EFFE DIGITAL STRATEGY</div><h1>Cabina di controllo</h1><p>Incassi, clienti, CRM e scadenze. Qui vedi solo ciò che richiede attenzione.</p></div><img class="hero-logo" src="/assets/logo-white.png"></div>
+    <div class="hero dashboard-hero" style="margin-top:16px"><div><div class="eyebrow">EFFE DIGITAL STRATEGY</div><h1>Cabina di controllo</h1><p>Incassi, clienti, CRM e scadenze. Qui vedi solo ciò che richiede attenzione.</p><button class="btn btn-ghost" id="copyKiraBriefing" type="button" style="margin-top:12px">Copia briefing per K.I.R.A.</button></div><img class="hero-logo" src="/assets/logo-white.png"></div>
     <div class="grid grid-kpi dashboard-kpis">${kpi('Previsto questo mese',fmtEUR(d.expectedMonth),'Rate del mese')}${kpi('Incassato del mese',fmtEUR(d.paidMonth),'Pagamenti confermati')}${kpi('Da incassare nel mese',fmtEUR(d.pendingMonth),'Ancora aperto')}${kpi('MRR attivo',fmtEUR(d.mrr),'Canoni ricorrenti')}${kpi('Clienti attivi',d.activeClients,'Portafoglio corrente')}${kpi('Follow-up CRM',d.dueLeads||0,'Scaduti o da fare oggi')}</div>
     <div class="grid two-col dashboard-main" style="margin-top:16px"><div class="card"><div class="section-title"><div><h2>Priorità</h2><span>Azioni generate automaticamente</span></div><button class="btn btn-ghost" id="openDeadlines">Tutte le scadenze</button></div><div class="decision-list">${actionHtml||'<div class="empty">Nessuna azione urgente. Tutto sotto controllo.</div>'}</div></div><div class="card"><div class="section-title"><div><h2>Stato agenzia</h2><span>Controllo sintetico</span></div></div><div class="score"><div class="score-ring" style="--score:${d.healthScore||0}"><div class="score-inner">${d.healthScore||0}</div></div><div><div class="strong">${d.healthScore>=80?'Ottimo andamento':d.healthScore>=60?'Situazione buona':'Richiede attenzione'}</div><p class="small muted">Incassi, scadenze, follow-up e report mensili.</p></div></div><div class="metric-row" style="margin-top:18px"><div class="metric"><b>${d.overduePayments||0}</b><span>incassi scaduti</span></div><div class="metric"><b>${d.endingPackages||0}</b><span>pacchetti entro 30 gg</span></div><div class="metric"><b>${d.openLeads||0}</b><span>lead aperti</span></div><div class="metric"><b>${d.missingReports||0}</b><span>report mese mancanti</span></div></div></div></div>
     <div class="card" style="margin-top:16px"><div class="section-title"><div><h2>Andamento incassi</h2><span>Ultimi 6 mesi</span></div><div class="small muted">Utile mese: <b style="color:var(--text)">${fmtEUR(d.profitMonth)}</b></div></div>${lineChart(d.monthly||[])}</div>`;
-    $$('.decision-row').forEach(b=>b.onclick=()=>navigate(b.dataset.page));$('#openDeadlines')?.addEventListener('click',()=>navigate('deadlines'));$('#openAppointments')?.addEventListener('click',()=>navigate('appointments'));$('#sendAppointmentsWhatsapp')?.addEventListener('click',()=>sendAppointmentWhatsapp());
+    $$('.decision-row').forEach(b=>b.onclick=()=>navigate(b.dataset.page));$('#copyKiraBriefing')?.addEventListener('click',copyKiraBriefing);$('#openDeadlines')?.addEventListener('click',()=>navigate('deadlines'));$('#openAppointments')?.addEventListener('click',()=>navigate('appointments'));$('#sendAppointmentsWhatsapp')?.addEventListener('click',()=>sendAppointmentWhatsapp());
   }catch(e){pageLoadError('Dashboard',e)}
 }
 
