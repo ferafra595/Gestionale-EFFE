@@ -64,7 +64,7 @@ async function copyKiraBriefing(){
       'SCADENZE (fino a 35):',...(deadlines.length?deadlines:['- Nessuna']),
       '',
       'Nota: riepilogo limitato, destinato esclusivamente alla chat privata K.I.R.A. Esclusi password, recapiti, indirizzi, documenti e note interne.'
-    ].join('\\n');
+    ].join('\n');
     try{
       if(!navigator.clipboard?.writeText)throw new Error('Clipboard non disponibile');
       await navigator.clipboard.writeText(report);
