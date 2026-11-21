@@ -394,6 +394,33 @@ function reportTrendPanel(items,clientId,metric='reach',platform='all'){
   const table=tableMetrics.length?`<div class="table-wrap" style="margin-top:12px"><table class="table"><thead><tr><th>Mese</th>${tableMetrics.map(k=>`<th>${reportMetrics[k]}</th>`).join('')}</tr></thead><tbody>${rows.slice().reverse().map(x=>`<tr><td>${reportPeriodLabel(x.period)}</td>${tableMetrics.map(k=>`<td>${formatReportMetric(k,x[k])}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`:'';
   return `${platform==='all'?latestPlatformCards(items,clientId):''}<div class="card report-trend-card" style="margin-top:16px"><div class="section-title"><div><h2>${summaryTitle}</h2><span>${reportPeriodLabel(latest.period)} · i valori a 0 non vengono mostrati</span></div><div class="report-filter-group"><select id="reportPlatform" class="select report-platform-select"><option value="all" ${platform==='all'?'selected':''}>Tutti i social</option>${platforms.map(p=>`<option value="${esc(p)}" ${p===platform?'selected':''}>${esc(p)}</option>`).join('')}</select>${availableMetrics.length?`<select id="reportMetric" class="select report-metric-select">${availableMetrics.map(k=>`<option value="${k}" ${k===metric?'selected':''}>${reportMetrics[k]}</option>`).join('')}</select>`:''}</div></div>${latestGrid}${availableMetrics.length?`<div id="reportTrendChart">${trendSvg(rows,metric)}</div>`:''}${table}</div>`;
 }
+// Dedicated, safe diagnostics for the Meta pilot. Do not reveal response bodies from HTML/error pages.
+async function socialMetaApi(url){
+  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),16000);
+  try{
+    const response=await fetch(url,{method:'GET',credentials:'same-origin',
+      headers:{Accept:'application/json'},cache:'no-store',signal:controller.signal});
+    const type=(response.headers.get('content-type')||'').toLowerCase();
+    if(!type.includes('application/json')){
+      const help=response.status===404?'Endpoint Meta non distribuito su Cloudflare.'
+        :response.status>=500?'Errore interno Cloudflare; controllare il deployment e i log delle Functions.'
+        :response.status===401?'Sessione amministratore scaduta. Effettua nuovamente l’accesso.'
+        :'Risposta non JSON dal server.';
+      throw new Error(help+' (HTTP '+response.status+')');
+    }
+    const data=await response.json().catch(()=>null);
+    if(!data||typeof data!=='object')throw new Error('Risposta JSON non valida (HTTP '+response.status+').');
+    if(!response.ok){
+      const safe=(typeof data.message==='string'&&data.message.length<300)?data.message:
+        (typeof data.error==='string'&&data.error.length<100?data.error:'Richiesta Meta non riuscita');
+      throw new Error(safe+' (HTTP '+response.status+(data.status?', '+String(data.status).slice(0,40):'')+').');
+    }
+    return data;
+  }catch(e){
+    if(e?.name==='AbortError')throw new Error('Timeout della verifica Meta. Controllare i log Cloudflare.');
+    throw e;
+  }finally{clearTimeout(timer)}
+}
 async function loadLiveMetaInsights(){
   const output=$('#metaLiveInsights'),month=$('#metaInsightsMonth')?.value,button=$('#refreshMetaInsights');
   if(!output||!/^\d{4}-\d{2}$/.test(month||''))return;
@@ -405,7 +432,7 @@ async function loadLiveMetaInsights(){
     const today=new Date().toISOString().slice(0,10);
     const exclusiveUntil=end>today?today:end;
     if(exclusiveUntil<=start){output.textContent='Nessun giorno concluso per il mese selezionato.';return}
-    const data=await api('/api/social/meta-insights?since='+encodeURIComponent(start)+'&until='+encodeURIComponent(exclusiveUntil));
+    const data=await socialMetaApi('/api/social/meta-insights?since='+encodeURIComponent(start)+'&until='+encodeURIComponent(exclusiveUntil));
     if(!$('#metaLiveInsights'))return;
     if(!data.connected){output.textContent=data.message||'Account Meta non collegato.';return}
     const m=data.metrics||{};
@@ -440,7 +467,7 @@ async function reportsPage(){
       const output=$('#metaInsightsTestResult'),button=$('#testMetaInsights');
       button.disabled=true;output.textContent='Verifica lettura Meta in corso…';
       try{
-        const data=await api('/api/social/meta-test');
+        const data=await socialMetaApi('/api/social/meta-test');
         if(data.connected){
           const a=data.account||{};
           output.textContent='Connesso: '+(a.username?'@'+a.username:'account '+(a.id||''))+' — follower attuali: '+(a.followers_count??'non disponibili')+'. Questa verifica non crea un report.';
